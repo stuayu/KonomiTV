@@ -505,7 +505,7 @@ class Channel(TortoiseModel):
             ## ex: tvk1 (gr031) / NHK総合1・福岡 (gr031)
             same_channel_number_count = await Channel.filter(
                 ~Q(id = self.id),  # チャンネル ID が自身のチャンネル ID と異なる (=異なるチャンネルだがチャンネル番号が同じ)
-                channel_number = channel_number,  # チャンネル番号が同じ
+                channel_number__startswith = channel_number,  # チャンネル番号が同じ
                 type = 'GR',  # 地デジのみ
             ).count()
 
