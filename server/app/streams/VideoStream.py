@@ -289,16 +289,21 @@ class VideoStream:
         virtual_playlist += '#EXT-X-VERSION:6\n'
         virtual_playlist += '#EXT-X-PLAYLIST-TYPE:VOD\n'
 
-        # HLS セグメントの実時間の最大値を指定する (SEGMENT_DURATION_SECONDS + 1 秒程度の余裕を持たせる)
-        virtual_playlist += f'#EXT-X-TARGETDURATION:{int(VideoEncodingTask.SEGMENT_DURATION_SECONDS + 1)}\n'
-
         # 事前に算出したセグメントをすべて記述する
+        virtual_playlist_segm = ''
+        ext_x_targetduration: float = float(0)
         for segment in self._segments:
-            virtual_playlist += f'#EXTINF:{segment.duration_seconds:.6f},\n'  # セグメントの長さ (秒, 小数点以下6桁まで)
-            virtual_playlist += f'segment?sequence={segment.sequence_index}&_={self._time_hash}\n'  # キャッシュ避けのためにタイムスタンプを付与する
+            if segment.duration_seconds > ext_x_targetduration: # HLS セグメントの実時間の最大値を計算する
+                ext_x_targetduration = segment.duration_seconds
+            virtual_playlist_segm += f'#EXTINF:{segment.duration_seconds:.6f},\n'  # セグメントの長さ (秒, 小数点以下6桁まで)
+            virtual_playlist_segm += f'segment?sequence={segment.sequence_index}&_={self._time_hash}\n'  # キャッシュ避けのためにタイムスタンプを付与する
 
-        virtual_playlist += f'#EXT-X-ENDLIST\n'
-        return virtual_playlist
+        virtual_playlist_segm += f'#EXT-X-ENDLIST\n'
+
+        # HLS セグメントの実時間の最大値を指定する (ext_x_targetduration + 1 秒程度の余裕を持たせる)
+        virtual_playlist += f'#EXT-X-TARGETDURATION:{int(ext_x_targetduration + 1)}\n'
+
+        return virtual_playlist + virtual_playlist_segm
 
 
     async def getSegment(self, segment_sequence: int) -> bytes | None:
