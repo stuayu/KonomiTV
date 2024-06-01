@@ -86,7 +86,7 @@ class MetadataAnalyzer:
                     ## "start_time" は "UTC 2023-06-26 23:59:52" のフォーマットになっているが、実際には JST の時刻が返される
                     ## ちゃんと JST のタイムゾーンが指定された datetime として扱うためには、datetime.fromisoformat() でパースする必要がある
                     ## 一度 ISO8601 に変換してからパースする
-                    start_time_iso8601 = str(track.start_time).replace('UTC ', '').replace(' ', 'T') + '+09:00'
+                    start_time_iso8601 = str(track.start_time).replace('UTC', '').strip().replace(' ', 'T') + '+09:00'
                     recorded_video.recording_start_time = datetime.fromisoformat(start_time_iso8601)
                     ## duration は小数点以下も含めた値が取得できるので、録画開始時刻を duration のうち小数点以下の部分を2で割った値だけ削る
                     ## これでかなり正確な録画開始時刻が算出できる
