@@ -1,9 +1,12 @@
 
 import asyncio
+import datetime
 import json
+import time
 import tweepy
 import tweepy.models
 import tweepy.parsers
+from app.routers.MisskeyRouter import MisskeyPost
 from fastapi import APIRouter
 from fastapi import Body
 from fastapi import Depends
@@ -315,9 +318,21 @@ async def TwitterTweetAPI(
     try:
 
         tweepy_api = twitter_account.getTweepyAPI()
+        misskey = MisskeyPost()
+
+        image_byte = []
+        for image in images:
+            f = await image.read()
+            image_byte.append([f, image.filename])
 
         # 画像をアップロードするタスク
         image_upload_task: list[Coroutine[Any, Any, Any | None]] = []
+        upload_tasks_mk: list[str] = []
+        dt_now = datetime.datetime.now()
+        for image in image_byte:
+            upload_tasks_mk.append(await misskey.uploadPictures(file=image[0], filename=dt_now.strftime("%Y年%m月%d日 %H:%M:%S")))
+        await asyncio.sleep(0)
+
         for image in images:
             image_upload_task.append(asyncio.to_thread(tweepy_api.media_upload,
                 filename = image.filename,
@@ -350,8 +365,19 @@ async def TwitterTweetAPI(
             'detail': error_message,
         }
 
-    # GraphQL API を使ってツイートを送信し、結果をそのまま返す
-    return await TwitterGraphQLAPI(twitter_account).createTweet(tweet, media_ids, request.headers.get('x-client-transaction-id'))
+    try:
+        # misskeyに投稿
+        await misskey.sendAttachedMessage(tweet, upload_tasks_mk)
+        # GraphQL API を使ってツイートを送信し、結果をそのまま返す
+        await TwitterGraphQLAPI(twitter_account).createTweet(tweet, media_ids, request.headers.get('x-client-transaction-id'))
+    except:
+        # エラーを握りつぶす
+        pass
+
+    return {
+        "is_success": True,
+        "detail": "ツイートの送信処理を実行しました。",
+    }
 
 
 @router.put(
