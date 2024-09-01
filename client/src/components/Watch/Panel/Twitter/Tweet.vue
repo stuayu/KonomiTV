@@ -163,6 +163,12 @@ const handleFavorite = async () => {
     &:hover {
         background-color: rgba(var(--v-theme-on-surface), 0.04);
     }
+    // タッチデバイスで hover を無効にする
+    @media (hover: none) {
+        &:hover {
+            background-color: transparent;
+        }
+    }
 
     :deep(.tweet-link) {
         color: rgb(var(--v-theme-twitter));
@@ -207,6 +213,12 @@ const handleFavorite = async () => {
 
         &:hover {
             opacity: 0.9;
+        }
+        // タッチデバイスで hover を無効にする
+        @media (hover: none) {
+            &:hover {
+                opacity: 1;
+            }
         }
     }
 
@@ -264,6 +276,7 @@ const handleFavorite = async () => {
     }
 
     &__image {
+        display: block;
         max-width: 100%;
         max-height: 175px;
         object-fit: cover;
@@ -277,12 +290,14 @@ const handleFavorite = async () => {
     }
 
     &__movie {
+        display: block;
         max-width: 100%;
         max-height: 300px;
         object-fit: cover;
         margin-top: 8px;
         margin-right: 6px;
         border-radius: 8px;
+        margin-bottom: 8px;
         cursor: auto;
     }
 
@@ -297,6 +312,12 @@ const handleFavorite = async () => {
 
         &:hover {
             background-color: rgba(var(--v-theme-on-surface), 0.04);
+        }
+        // タッチデバイスで hover を無効にする
+        @media (hover: none) {
+            &:hover {
+                background-color: transparent;
+            }
         }
     }
 
@@ -323,23 +344,33 @@ const handleFavorite = async () => {
 
     &__actions {
         display: flex;
+        position: relative;
+        margin-top: -2px;
     }
 
     &__action {
         display: flex;
         align-items: center;
-        padding: 2px 3px;
-        border-radius: 4px;
         margin-right: 20px;
+        padding: 3px 4px;
+        border-radius: 4px;
         color: rgba(var(--v-theme-on-surface), 0.6);
         font-size: 12px;
         background: none;
         border: none;
         transition: color 0.15s ease, background-color 0.15s ease;
+        user-select: none;
+        outline: none;
         cursor: pointer;
 
         &:hover {
             background-color: rgba(var(--v-theme-on-surface), 0.1);
+        }
+        // タッチデバイスで hover を無効にする
+        @media (hover: none) {
+            &:hover {
+                background-color: transparent;
+            }
         }
 
         &--retweet {

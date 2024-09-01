@@ -40,6 +40,11 @@ class ClientSettings(BaseModel):
     # showed_panel_last_time: 同期無効
     # selected_twitter_account_id: 同期無効
     saved_twitter_hashtags: list[str] = []
+    # lshaped_screen_crop_enabled: 同期無効
+    # lshaped_screen_crop_zoom_level: 同期無効
+    # lshaped_screen_crop_x_position: 同期無効
+    # lshaped_screen_crop_y_position: 同期無効
+    # lshaped_screen_crop_zoom_origin: 同期無効
     pinned_channel_ids: list[str] = []
     panel_display_state: Literal['RestorePreviousState', 'AlwaysDisplay', 'AlwaysFold'] = 'RestorePreviousState'
     tv_panel_active_tab: Literal['Program', 'Channel', 'Comment', 'Twitter'] = 'Program'
@@ -65,8 +70,10 @@ class ClientSettings(BaseModel):
     # enable_internet_access_from_data_broadcasting: 同期無効
     capture_save_mode: Literal['Browser', 'UploadServer', 'Both'] = 'UploadServer'
     capture_caption_mode: Literal['VideoOnly', 'CompositingCaption', 'Both'] = 'Both'
+    capture_filename_pattern: str = 'Capture_%date%-%time%'
     # capture_copy_to_clipboard: 同期無効
     # sync_settings: 同期無効
+    prefer_posting_to_nicolive: bool = True
     comment_speed_rate: float = 1.0
     comment_font_size: int = 34
     close_comment_form_after_sending: bool = True

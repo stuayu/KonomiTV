@@ -19,6 +19,11 @@ export interface IClientSettings {
     // showed_panel_last_time: 同期無効
     // selected_twitter_account_id: 同期無効
     saved_twitter_hashtags: string[];
+    // lshaped_screen_crop_enabled: 同期無効
+    // lshaped_screen_crop_zoom_level: 同期無効
+    // lshaped_screen_crop_x_position: 同期無効
+    // lshaped_screen_crop_y_position: 同期無効
+    // lshaped_screen_crop_zoom_origin: 同期無効
     pinned_channel_ids: string[];
     panel_display_state: 'RestorePreviousState' | 'AlwaysDisplay' | 'AlwaysFold';
     tv_panel_active_tab: 'Program' | 'Channel' | 'Comment' | 'Twitter';
@@ -44,8 +49,10 @@ export interface IClientSettings {
     // enable_internet_access_from_data_broadcasting: 同期無効
     capture_save_mode: 'Browser' | 'UploadServer' | 'Both';
     capture_caption_mode: 'VideoOnly' | 'CompositingCaption' | 'Both';
+    capture_filename_pattern: string;
     // capture_copy_to_clipboard: 同期無効
     // sync_settings: 同期無効
+    prefer_posting_to_nicolive: boolean;
     comment_speed_rate: number;
     comment_font_size: number;
     close_comment_form_after_sending: boolean;

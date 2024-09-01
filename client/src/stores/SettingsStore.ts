@@ -19,6 +19,11 @@ export interface ILocalClientSettings extends IClientSettings {
     showed_panel_last_time: boolean;
     selected_twitter_account_id: number | null;
     saved_twitter_hashtags: string[];
+    lshaped_screen_crop_enabled: boolean;
+    lshaped_screen_crop_zoom_level: number;
+    lshaped_screen_crop_x_position: number;
+    lshaped_screen_crop_y_position: number;
+    lshaped_screen_crop_zoom_origin: 'TopLeft' | 'TopRight' | 'BottomLeft' | 'BottomRight';
     pinned_channel_ids: string[];
     panel_display_state: 'RestorePreviousState' | 'AlwaysDisplay' | 'AlwaysFold';
     tv_panel_active_tab: 'Program' | 'Channel' | 'Comment' | 'Twitter';
@@ -44,8 +49,10 @@ export interface ILocalClientSettings extends IClientSettings {
     enable_internet_access_from_data_broadcasting: boolean;
     capture_save_mode: 'Browser' | 'UploadServer' | 'Both';
     capture_caption_mode: 'VideoOnly' | 'CompositingCaption' | 'Both';
+    capture_filename_pattern: string;
     capture_copy_to_clipboard: boolean;
     sync_settings: boolean;
+    prefer_posting_to_nicolive: boolean;
     comment_speed_rate: number;
     comment_font_size: number;
     close_comment_form_after_sending: boolean;
@@ -79,6 +86,19 @@ export const ILocalClientSettingsDefault: ILocalClientSettings = {
     selected_twitter_account_id: null,
     // 保存している Twitter のハッシュタグが入るリスト
     saved_twitter_hashtags: [],
+
+    // ***** L字画面のクロップ設定 *****
+
+    // L字画面のクロップを有効にする (Default: 無効)
+    lshaped_screen_crop_enabled: false,
+    // L字画面のクロップの拡大率 (Default: 100%)
+    lshaped_screen_crop_zoom_level: 100,
+    // L字画面のクロップのX座標 (Default: 0%)
+    lshaped_screen_crop_x_position: 0,
+    // L字画面のクロップのY座標 (Default: 0%)
+    lshaped_screen_crop_y_position: 0,
+    // L字画面のクロップの拡大起点 (Default: 右下)
+    lshaped_screen_crop_zoom_origin: 'BottomRight',
 
     // ***** 設定 → 全般 *****
 
@@ -146,6 +166,8 @@ export const ILocalClientSettingsDefault: ILocalClientSettings = {
     capture_save_mode: 'UploadServer',
     // 字幕が表示されているときのキャプチャの保存モード (Default: 映像のみのキャプチャと、字幕を合成したキャプチャを両方保存する)
     capture_caption_mode: 'Both',
+    // キャプチャの保存ファイル名 (Default: Capture_%date%-%time%)
+    capture_filename_pattern: 'Capture_%date%-%time%',
     // キャプチャをクリップボードにコピーする (Default: 無効) (同期無効)
     capture_copy_to_clipboard: false,
 
@@ -156,6 +178,8 @@ export const ILocalClientSettingsDefault: ILocalClientSettings = {
 
     // ***** 設定 → ニコニコ実況 *****
 
+    // 可能であればニコニコ実況にコメントする (Default: オン)
+    prefer_posting_to_nicolive: true,
     // コメントの速さ (Default: 1倍)
     comment_speed_rate: 1,
     // コメントのフォントサイズ (Default: 34px)
@@ -203,6 +227,11 @@ const SYNCABLE_SETTINGS_KEYS: (keyof IClientSettings)[] = [
     // showed_panel_last_time: 同期無効
     // selected_twitter_account_id: 同期無効
     'saved_twitter_hashtags',
+    // lshaped_screen_crop_enabled: 同期無効
+    // lshaped_screen_crop_zoom_level: 同期無効
+    // lshaped_screen_crop_x_position: 同期無効
+    // lshaped_screen_crop_y_position: 同期無効
+    // lshaped_screen_crop_zoom_origin: 同期無効
     'pinned_channel_ids',
     'panel_display_state',
     'tv_panel_active_tab',
@@ -228,8 +257,10 @@ const SYNCABLE_SETTINGS_KEYS: (keyof IClientSettings)[] = [
     // enable_internet_access_from_data_broadcasting: 同期無効
     'capture_save_mode',
     'capture_caption_mode',
+    'capture_filename_pattern',
     // capture_copy_to_clipboard: 同期無効
     // sync_settings: 同期無効
+    'prefer_posting_to_nicolive',
     'comment_speed_rate',
     'comment_font_size',
     'close_comment_form_after_sending',

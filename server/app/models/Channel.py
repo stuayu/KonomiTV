@@ -178,9 +178,10 @@ class Channel(TortoiseModel):
                 channel.jikkyo_force = None
                 channel.is_watchable = True
 
-                # すでに放送が終了した「FOXスポーツ＆エンターテインメント」「BSスカパー」「Dlife」を除外
+                # すでに放送が終了した「NHK BSプレミアム」「FOXスポーツ&エンターテインメント」「BSスカパー」「Dlife」を除外
                 ## 放送終了後にチャンネルスキャンしていないなどの理由でバックエンド側にチャンネル情報が残っている場合がある
-                if channel.type == 'BS' and channel.service_id in [238, 241, 258]:
+                ## 特に「NHK BSプレミアム」(Ch: 103) は互換性の兼ね合いで停波後も SDT にサービス情報が残っているため、明示的に除外する必要がある
+                if channel.type == 'BS' and channel.service_id in [103, 238, 241, 258]:
                     continue
 
                 # チャンネルタイプが STARDIGIO でサービス ID が 400 ～ 499 以外のチャンネルを除外
@@ -283,13 +284,14 @@ class Channel(TortoiseModel):
                     continue
 
                 # EPG 取得対象でないチャンネルを弾く
-                ## EDCB のデフォルトの EPG 取得対象チャンネルはデジタルTVサービス・デジタル音声サービスのみ
+                ## EDCB のデフォルトの EPG 取得対象チャンネルはデジタルTVサービスのみ
                 ## EDCB で EPG 取得対象でないチャンネルは番組情報が取得できないし、当然予約録画もできず登録しておく意味がない
                 ## (BS では極々稀に野球中継の延長時などに臨時サービスが運用されうるが、年に数度あるかないか程度なので当面考慮しない)
                 ## この処理により、EDCB 上で有効とされているチャンネル数と KonomiTV 上のチャンネル数が概ね一致するようになる
                 ## (上記処理で除外しているワンセグなどのチャンネルが EPG 取得対象になっている場合は一致しないが、基本ないと思うので考慮しない)
                 ## これにより、番組検索時のサービス絞り込みリストに EPG 取得対象でないチャンネルが紛れ込むのを回避できる
-                if service['epg_cap_flag'] == False:
+                ## デジタル音声サービス (service_type: 0x02 / 現在は Ch:531 放送大学ラジオのみ) のみ、デフォルトでは EPG 取得対象に含まれないため通す
+                if service['epg_cap_flag'] == False and service['service_type'] != 0x02:
                     continue
 
                 # チャンネル ID
@@ -322,9 +324,10 @@ class Channel(TortoiseModel):
                 channel.jikkyo_force = None
                 channel.is_watchable = True
 
-                # すでに放送が終了した「FOXスポーツ＆エンターテインメント」「BSスカパー」「Dlife」を除外
+                # すでに放送が終了した「NHK BSプレミアム」「FOXスポーツ&エンターテインメント」「BSスカパー」「Dlife」を除外
                 ## 放送終了後にチャンネルスキャンしていないなどの理由でバックエンド側にチャンネル情報が残っている場合がある
-                if channel.type == 'BS' and channel.service_id in [238, 241, 258]:
+                ## 特に「NHK BSプレミアム」(Ch: 103) は互換性の兼ね合いで停波後も SDT にサービス情報が残っているため、明示的に除外する必要がある
+                if channel.type == 'BS' and channel.service_id in [103, 238, 241, 258]:
                     continue
 
                 # チャンネルタイプが STARDIGIO でサービス ID が 400 ～ 499 以外のチャンネルを除外

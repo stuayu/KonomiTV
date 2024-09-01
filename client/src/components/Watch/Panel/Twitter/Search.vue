@@ -18,7 +18,7 @@
                     <Icon icon="fluent:settings-16-filled" width="20" />
                 </button>
                 <button v-ripple class="search-header__refresh" style="color: rgb(var(--v-theme-twitter-lighten-1))"
-                    @click="performSearchTweets" v-tooltip.bottom="'検索結果を更新'">
+                    @click="performSearchTweets" v-ftooltip.bottom="'検索結果を更新'">
                     <Icon icon="ic:round-refresh" width="20" :class="isFetching ? 'animate-spin' : ''" />
                 </button>
             </div>
@@ -33,7 +33,7 @@
             />
         </div>
         <DynamicScroller ref="scroller" class="search-tweets" :direction="'vertical'" :items="tweets"
-            :min-item-size="80" :buffer="400">
+            :min-item-size="80" :buffer="400" v-show="tweets.length > 0">
             <template v-slot="{item, active}">
                 <DynamicScrollerItem
                     :item="item"
@@ -43,6 +43,12 @@
                 </DynamicScrollerItem>
             </template>
         </DynamicScroller>
+        <div class="search-announce" v-show="tweets.length === 0">
+            <div class="search-announce__heading">まだツイートがありません。</div>
+            <div class="search-announce__text">
+                <p class="mt-0 mb-0">右上の更新ボタンを押すと、最新の<br>ツイート検索結果を時系列で表示できます。</p>
+            </div>
+        </div>
     </div>
 </template>
 <script lang="ts" setup>
@@ -51,6 +57,7 @@ import { storeToRefs } from 'pinia';
 import { ref, watch, onMounted, nextTick } from 'vue';
 
 import Tweet from '@/components/Watch/Panel/Twitter/Tweet.vue';
+import Message from '@/message';
 import Twitter, { ITweet } from '@/services/Twitter';
 import useTwitterStore from '@/stores/TwitterStore';
 import useUserStore from '@/stores/UserStore';
@@ -83,13 +90,17 @@ const onKeyDown = (event: KeyboardEvent) => {
 };
 
 const performSearchTweets = async () => {
-    if (isFetching.value || !searchQuery.value.trim()) {
+    if (isFetching.value) {
+        return;
+    }
+    if (!searchQuery.value.trim()) {
+        Message.warning('検索キーワードを入力してください。');
         return;
     }
     isFetching.value = true;
     await useUserStore().fetchUser();
     if (!selected_twitter_account.value) {
-        console.warn('selected_twitter_account is null');
+        Message.warning('ツイートを検索するには、Twitter アカウントと連携してください。');
         tweets.value = [];
         isFetching.value = false;
         return;
@@ -100,7 +111,7 @@ const performSearchTweets = async () => {
     // タイムラインと異なり、検索結果は一度に 20 件しか返ってこない
     const result = await Twitter.searchTweets(selected_twitter_account.value.screen_name, searchQuery.value, nextCursorId.value);
     if (result && result.tweets) {
-        // 「リツイートを表示しない」がチェックされている場合はリツイートのツイートを除外
+        // 「リツイートを表示する」がオフの場合はリツイートのツイートを除外
         if (showRetweets.value === false) {
             result.tweets = result.tweets.filter(tweet => !tweet.retweeted_tweet);
         }
@@ -275,6 +286,37 @@ onMounted(() => {
 
 .animate-spin {
     animation: spin 1s linear infinite;
+}
+
+.search-announce {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    height: 100%;
+    padding-left: 12px;
+    padding-right: 5px;
+    @include tablet-vertical {
+        padding-left: 24px;
+        padding-right: 24px;
+    }
+
+    &__heading {
+        font-size: 20px;
+        font-weight: bold;
+        @include smartphone-horizontal {
+            font-size: 16px;
+        }
+    }
+    &__text {
+        margin-top: 12px;
+        color: rgb(var(--v-theme-text-darken-1));
+        font-size: 13.5px;
+        text-align: center;
+        @include smartphone-horizontal {
+            font-size: 12px;
+        }
+    }
 }
 
 </style>

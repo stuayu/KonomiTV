@@ -8,7 +8,7 @@
                     <Icon icon="fluent:settings-16-filled" width="20" />
                 </button>
                 <button v-ripple class="timeline-header__refresh" style="color: rgb(var(--v-theme-twitter-lighten-1))" @click="fetchTimelineTweets"
-                    v-tooltip.bottom="'タイムラインを更新'">
+                    v-ftooltip.bottom="'タイムラインを更新'">
                     <Icon icon="ic:round-refresh" width="20" :class="isFetching ? 'animate-spin' : ''" />
                 </button>
             </div>
@@ -23,7 +23,7 @@
             />
         </div>
         <DynamicScroller class="timeline-tweets" :direction="'vertical'" :items="tweets"
-            :min-item-size="80" :buffer="400">
+            :min-item-size="80" :buffer="400" v-show="tweets.length > 0">
             <template v-slot="{item, active}">
                 <DynamicScrollerItem
                     :item="item"
@@ -33,6 +33,12 @@
                 </DynamicScrollerItem>
             </template>
         </DynamicScroller>
+        <div class="timeline-announce" v-show="tweets.length === 0">
+            <div class="timeline-announce__heading">まだツイートがありません。</div>
+            <div class="timeline-announce__text">
+                <p class="mt-0 mb-0">右上の更新ボタンを押すと、最新の<br>ホームタイムラインを時系列で表示できます。</p>
+            </div>
+        </div>
     </div>
 </template>
 
@@ -41,6 +47,7 @@ import { storeToRefs } from 'pinia';
 import { ref, onMounted, watch } from 'vue';
 
 import Tweet from '@/components/Watch/Panel/Twitter/Tweet.vue';
+import Message from '@/message';
 import Twitter, { ITweet } from '@/services/Twitter';
 import useTwitterStore from '@/stores/TwitterStore';
 import useUserStore from '@/stores/UserStore';
@@ -58,25 +65,38 @@ const toggleSettings = () => {
     showSettings.value = !showSettings.value;
 };
 
+let isFirstFetchCompleted = false;
 const fetchTimelineTweets = async () => {
     if (isFetching.value) return;
     isFetching.value = true;
     await useUserStore().fetchUser();
     if (!selected_twitter_account.value) {
-        console.warn('selected_twitter_account is null');
+        if (isFirstFetchCompleted) {
+            Message.warning('タイムラインを更新するには、Twitter アカウントと連携してください。');
+        }
         tweets.value = [];
         isFetching.value = false;
+        isFirstFetchCompleted = true;
         return;
     }
+    isFirstFetchCompleted = true;
 
     // タイムラインのツイートを「投稿時刻が新しい順」に取得
     // つまり後ろの要素になるほど古いツイートになる
     const result = await Twitter.getHomeTimeline(selected_twitter_account.value.screen_name, nextCursorId.value);
     if (result && result.tweets) {
-        // 「リツイートを表示しない」がチェックされている場合はリツイートのツイートを除外
-        if (showRetweets.value === false) {
-            result.tweets = result.tweets.filter(tweet => !tweet.retweeted_tweet);
-        }
+        result.tweets = result.tweets.filter(tweet => {
+            let result = true;
+            // 「リツイートを表示する」がオフの場合はリツイートのツイートを除外
+            if (showRetweets.value === false) {
+                result = !tweet.retweeted_tweet;
+            }
+            // 自分の RT を除外
+            if (tweet.retweeted_tweet !== null && tweet.user.screen_name === selected_twitter_account.value?.screen_name) {
+                result = false;
+            }
+            return result;
+        });
         // 新しいツイートを取得したら tweets の先頭に追加し、tweets.value を更新
         tweets.value = [...result.tweets, ...tweets.value];
         // 次のタイムラインを取得するためのカーソル ID を更新
@@ -180,6 +200,37 @@ watch(selected_twitter_account, () => {
 
 .animate-spin {
     animation: spin 1s linear infinite;
+}
+
+.timeline-announce {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    height: 100%;
+    padding-left: 12px;
+    padding-right: 5px;
+    @include tablet-vertical {
+        padding-left: 24px;
+        padding-right: 24px;
+    }
+
+    &__heading {
+        font-size: 20px;
+        font-weight: bold;
+        @include smartphone-horizontal {
+            font-size: 16px;
+        }
+    }
+    &__text {
+        margin-top: 12px;
+        color: rgb(var(--v-theme-text-darken-1));
+        font-size: 13.5px;
+        text-align: center;
+        @include smartphone-horizontal {
+            font-size: 12px;
+        }
+    }
 }
 
 </style>
