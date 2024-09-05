@@ -10,12 +10,12 @@ import ruamel.yaml.scalarstring
 import subprocess
 import sys
 from pydantic import (
-    AnyHttpUrl,
     BaseModel,
     confloat,
     DirectoryPath,
     field_validator,
     FilePath,
+    PositiveFloat,
     PositiveInt,
     UrlConstraints,
     ValidationError,
@@ -37,6 +37,7 @@ from app.constants import (
 # 詳細は client/src/services/Settings.ts と client/src/stores/SettingsStore.ts を参照
 
 class ClientSettings(BaseModel):
+    last_synced_at: Annotated[float, PositiveFloat] = 0.0
     # showed_panel_last_time: 同期無効
     # selected_twitter_account_id: 同期無効
     saved_twitter_hashtags: list[str] = []
@@ -63,7 +64,7 @@ class ClientSettings(BaseModel):
     caption_font: str = 'Windows TV MaruGothic'
     always_border_caption_text: bool = True
     specify_caption_opacity: bool = False
-    caption_opacity: float = 1.0
+    caption_opacity: Annotated[float, confloat(ge=0.0, le=1.0)] = 1.0
     tv_show_superimpose: bool = True
     video_show_superimpose: bool = False
     # tv_show_data_broadcasting: 同期無効
@@ -74,8 +75,8 @@ class ClientSettings(BaseModel):
     # capture_copy_to_clipboard: 同期無効
     # sync_settings: 同期無効
     prefer_posting_to_nicolive: bool = True
-    comment_speed_rate: float = 1.0
-    comment_font_size: int = 34
+    comment_speed_rate: Annotated[float, PositiveFloat] = 1.0
+    comment_font_size: Annotated[int, PositiveInt] = 34
     close_comment_form_after_sending: bool = True
     mute_vulgar_comments: bool = True
     mute_abusive_discriminatory_prejudiced_comments: bool = True
@@ -100,7 +101,7 @@ class _ServerSettingsGeneral(BaseModel):
     backend: Literal['EDCB', 'Mirakurun'] = 'EDCB'
     always_receive_tv_from_mirakurun: bool = False
     edcb_url: Annotated[Url, UrlConstraints(allowed_schemes=['tcp'])] = Url('tcp://127.0.0.1:4510/')
-    mirakurun_url: AnyHttpUrl = AnyHttpUrl('http://127.0.0.1:40772/')
+    mirakurun_url: Annotated[Url, UrlConstraints(allowed_schemes=['http', 'https'])] = Url('http://127.0.0.1:40772/')
     encoder: Literal['FFmpeg', 'QSVEncC', 'NVEncC', 'VCEEncC', 'rkmppenc'] = 'FFmpeg'
     program_update_interval: Annotated[float, confloat(ge=0.1)] = 5.0
     debug: bool = False
@@ -161,10 +162,15 @@ class _ServerSettingsGeneral(BaseModel):
                     headers = API_REQUEST_HEADERS,
                     timeout = 20,  # 久々のアクセスだとなぜか時間がかかることがあるため、ここだけタイムアウトを長めに設定
                 )
+                # レスポンスヘッダーの server が mirakc であれば mirakc と判定できる
+                if ('server' in response.headers) and ('mirakc' in response.headers['server']):
+                    mirakurun_or_mirakc = 'mirakc'
+                else:
+                    mirakurun_or_mirakc = 'Mirakurun'
             except (httpx.NetworkError, httpx.TimeoutException):
                 raise ValueError(
-                    f'Mirakurun ({mirakurun_url}) にアクセスできませんでした。\n'
-                    'Mirakurun が起動していないか、URL を間違えている可能性があります。'
+                    f'Mirakurun / mirakc ({mirakurun_url}) にアクセスできませんでした。\n'
+                    'Mirakurun / mirakc が起動していないか、URL を間違えている可能性があります。'
                 )
             try:
                 response_json = response.json()
@@ -172,13 +178,13 @@ class _ServerSettingsGeneral(BaseModel):
                     raise ValueError()
             except Exception:
                 raise ValueError(
-                    f'{mirakurun_url} は Mirakurun の URL ではありません。\n'
-                    'Mirakurun の URL を間違えている可能性があります。'
+                    f'{mirakurun_url} は {mirakurun_or_mirakc} の URL ではありません。\n'
+                    f'{mirakurun_or_mirakc} の URL を間違えている可能性があります。'
                 )
             from app import logging
-            logging.info(f'Backend: Mirakurun {response_json.get("current")} ({mirakurun_url})')
+            logging.info(f'Backend: {mirakurun_or_mirakc} {response_json.get("current")} ({mirakurun_url})')
             if info.data.get('always_receive_tv_from_mirakurun') is True:
-                logging.info(f'Always receive TV from Mirakurun.')
+                logging.info(f'Always receive TV from {mirakurun_or_mirakc}.')
         return mirakurun_url
 
     @field_validator('encoder')
