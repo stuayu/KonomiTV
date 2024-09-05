@@ -1183,6 +1183,19 @@ files = [
 ]
 
 [[package]]
+name = "misskey-py"
+version = "4.1.0"
+description = "The misskey library for Python. misskey is made by syuilo."
+optional = false
+python-versions = "*"
+files = [
+    {file = "Misskey.py-4.1.0-py3-none-any.whl", hash = "sha256:d118891d0cd59d7e8942870ab2145c78221ec9ea0c9a79e309a473f0a8db96fe"},
+]
+
+[package.dependencies]
+requests = "*"
+
+[[package]]
 name = "mslex"
 version = "1.2.0"
 description = "shlex for windows"
@@ -2932,4 +2945,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.12"
-content-hash = "77348715eb1eef577ec7f65c62447920acc51689c86b45404d927576cf143e18"
+content-hash = "b752ab3445522ea1547e8b851decce35cd50465143da0ee86adf90fde2713d8c"
