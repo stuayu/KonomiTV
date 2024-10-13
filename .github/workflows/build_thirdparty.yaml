@@ -15,9 +15,9 @@ on:
 env:
   # Python のバージョン (Python Standalone Builds のリリースを指定する)
   ## ref: https://github.com/indygreg/python-build-standalone/releases
-  PYTHON_TAG: '20240814'
+  PYTHON_TAG: '20241008'
   PYTHON_MAJOR_VERSION: '3.11'
-  PYTHON_VERSION: '3.11.9'
+  PYTHON_VERSION: '3.11.10'
   # Poetry のバージョン
   POETRY_VERSION: '1.8.3'
   # FFmpeg のバージョン (FFmpeg-Builds のリリースを指定する)
@@ -37,8 +37,8 @@ env:
   ## ref: https://github.com/rigaya/NVEnc/releases
   ## ref: https://github.com/rigaya/VCEEnc/releases
   ## ref: https://github.com/rigaya/rkmppenc/releases
-  QSVENCC_VERSION: '7.69'
-  NVENCC_VERSION: '7.66'
+  QSVENCC_VERSION: '7.70'
+  NVENCC_VERSION: '7.70'
   VCEENCC_VERSION: '8.23'
   RKMPPENC_VERSION: '0.09'
   # libmediainfo のバージョン
