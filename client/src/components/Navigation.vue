@@ -67,6 +67,10 @@
                         <span v-if="!iconOnly" class="navigation__link-text">視聴履歴</span>
                     </router-link>
                     <v-spacer></v-spacer>
+                    <a v-ripple class="navigation__link" active-class="navigation__link--active" href="/cdn-cgi/access/logout" v-if="settingsStore.settings.is_cloudflare_zerotrust">
+                        <Icon class="navigation__link-icon" icon="fluent:sign-out-20-regular" width="26px" />
+                        <span class="navigation__link-text">CFからログアウト</span>
+                    </a>
                     <router-link v-ripple class="navigation__link" active-class="navigation__link--active" to="/settings/"
                         :class="{
                             'navigation__link--active': $route.path.startsWith('/settings'),
@@ -102,6 +106,7 @@ import { defineComponent } from 'vue';
 
 import BottomNavigation from '@/components/BottomNavigation.vue';
 import useVersionStore from '@/stores/VersionStore';
+import useSettingsStore from '@/stores/SettingsStore';
 
 export default defineComponent({
     name: 'Navigation',
@@ -118,6 +123,7 @@ export default defineComponent({
     },
     computed: {
         ...mapStores(useVersionStore),
+        ...mapStores(useSettingsStore),
     },
     async created() {
         await this.versionStore.fetchServerVersion();
