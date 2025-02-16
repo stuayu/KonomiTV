@@ -10,7 +10,6 @@ import gc
 import httpx
 import json
 import time
-import traceback
 from datetime import datetime
 from datetime import timedelta
 from tortoise import connections
@@ -117,8 +116,8 @@ class Program(TortoiseModel):
                 # EDCB バックエンド
                 elif Config().general.backend == 'EDCB':
                     await cls.updateFromEDCB()
-            except Exception:
-                traceback.print_exc()
+            except Exception as ex:
+                logging.error('Failed to update programs:', exc_info=ex)
 
         logging.info(f'Programs update complete. ({round(time.time() - timestamp, 3)} sec)')
 
@@ -213,10 +212,10 @@ class Program(TortoiseModel):
                         raise Exception(f'Failed to get programs from Mirakurun / mirakc. (HTTP Error {mirakurun_programs_api_response.status_code})')
                     programs: list[dict[str, Any]] = mirakurun_programs_api_response.json()
                 except httpx.NetworkError as ex:
-                    logging.error(f'Failed to get programs from Mirakurun / mirakc. (Network Error)')
+                    logging.error('Failed to get programs from Mirakurun / mirakc. (Network Error)')
                     raise ex
                 except httpx.TimeoutException as ex:
-                    logging.error(f'Failed to get programs from Mirakurun / mirakc. (Connection Timeout)')
+                    logging.error('Failed to get programs from Mirakurun / mirakc. (Connection Timeout)')
                     raise ex
 
                 # この変数から更新or更新不要な番組情報を削除していき、残った古い番組情報を最後にまとめて削除する
@@ -459,8 +458,8 @@ class Program(TortoiseModel):
 
 
         # マルチプロセス実行時は、明示的に例外を拾わないとなぜかメインプロセスも含め全体がフリーズしてしまう
-        except Exception:
-            logging.error(traceback.format_exc())
+        except Exception as ex:
+            logging.error('Failed to update programs from Mirakurun:', exc_info=ex)
 
         # マルチプロセス実行時は、開いた Tortoise ORM のコネクションを明示的に閉じる
         # コネクションを閉じないと Ctrl+C を押下しても終了できない
@@ -744,8 +743,8 @@ class Program(TortoiseModel):
                             pass
 
         # マルチプロセス実行時は、明示的に例外を拾わないとなぜかメインプロセスも含め全体がフリーズしてしまう
-        except Exception:
-            logging.error(traceback.format_exc())
+        except Exception as ex:
+            logging.error('Failed to update programs from EDCB:', exc_info=ex)
 
         # マルチプロセス実行時は、開いた Tortoise ORM のコネクションを明示的に閉じる
         # コネクションを閉じないと Ctrl+C を押下しても終了できない

@@ -203,16 +203,21 @@ def main(
     ## 自動リロードモードと通常時で呼び方が異なる
     ## ここで終了までブロッキングされる（非同期 I/O のエントリーポイント）
     ## ref: https://github.com/encode/uvicorn/blob/0.18.2/uvicorn/main.py#L568-L575
-    if server_config.should_reload:
-        # 自動リロードモード (Linux 専用)
-        ## Windows で自動リロードモードを機能させるには SelectorEventLoop が必要だが、外部プロセス実行に利用している
-        ## asyncio.subprocess.create_subprocess_exec() は ProactorEventLoop でないと動作しないため、Windows では事実上利用できない
-        ## 外部プロセス実行を伴うストリーミング視聴を行わなければ一応 Windows でも機能する
-        sock = server_config.bind_socket()
-        WatchFilesReload(server_config, target=server.run, sockets=[sock]).run()
-    else:
-        # 通常時
-        server.run()
+    try:
+        if server_config.should_reload:
+            # 自動リロードモード (Linux 専用)
+            ## Windows で自動リロードモードを機能させるには SelectorEventLoop が必要だが、外部プロセス実行に利用している
+            ## asyncio.subprocess.create_subprocess_exec() は ProactorEventLoop でないと動作しないため、Windows では事実上利用できない
+            ## 外部プロセス実行を伴うストリーミング視聴を行わなければ一応 Windows でも機能する
+            sock = server_config.bind_socket()
+            WatchFilesReload(server_config, target=server.run, sockets=[sock]).run()
+        else:
+            # 通常時
+            server.run()
+    except KeyboardInterrupt:
+        # Uvicorn のサーバーインスタンスから KeyboardInterrupt が送出された場合は一旦無視して、HTTPS リバースプロキシを確実に終了する
+        # 少し前の Uvicorn は KeyboardInterrupt を内部で握り潰していたが、最近のバージョンから送出するようになった
+        pass
 
     # HTTPS リバースプロキシを終了
     reverse_proxy_process.terminate()
@@ -232,7 +237,7 @@ def main(
         # os.execv() で現在のプロセスを新規に起動したプロセスに置き換える
         ## os.execv() は戻らないので、事前にロックファイルを削除しておく
         RESTART_REQUIRED_LOCK_PATH.unlink()
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
 
 if __name__ == '__main__':

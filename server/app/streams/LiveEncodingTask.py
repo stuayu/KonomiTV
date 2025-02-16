@@ -3,6 +3,7 @@
 # ref: https://stackoverflow.com/a/33533514/17124142
 from __future__ import annotations
 
+import anyio
 import aiofiles
 import aiohttp
 import asyncio
@@ -37,6 +38,10 @@ class LiveEncodingTask:
     # H.265 再生時のエンコード後のストリームの GOP 長 (秒)
     GOP_LENGTH_SECONDS_H265: ClassVar[float] = float(2)
 
+    # エンコードタスクの最大リトライ回数
+    ## この数を超えた場合はエンコードタスクを再起動しない（無限ループを避ける）
+    MAX_RETRY_COUNT: ClassVar[int] = 10  # 10回まで
+
     # チューナーから放送波 TS を読み取る際のタイムアウト (秒)
     TUNER_TS_READ_TIMEOUT: ClassVar[int] = 15
 
@@ -63,10 +68,6 @@ class LiveEncodingTask:
 
         # エンコードタスクのリトライ回数のカウント
         self._retry_count = 0
-
-        # エンコードタスクの最大リトライ回数
-        ## この数を超えた場合はエンコードタスクを再起動しない（無限ループを避ける）
-        self._max_retry_count = 5  # 5 回まで
 
 
     def isFullHDChannel(self, network_id: int, service_id: int) -> bool:
@@ -135,7 +136,7 @@ class LiveEncodingTask:
 
         # フラグ
         ## 主に FFmpeg の起動を高速化するための設定
-        ## max_interleave_delta: mux 時に影響するオプションで、増やしすぎると CM で詰まりがちになるが、減らしすぎると LL-HLS で音ズレしやすくなる
+        ## max_interleave_delta: mux 時に影響するオプションで、増やしすぎると CM で詰まりがちになる
         ## リトライなしの場合は 500K (0.5秒) に設定し、リトライ回数に応じて 100K (0.1秒) ずつ増やす
         max_interleave_delta = round(500 + (self._retry_count * 100))
         options.append(f'-fflags nobuffer -flags low_delay -max_delay 250000 -max_interleave_delta {max_interleave_delta}K -threads auto')
@@ -218,7 +219,7 @@ class LiveEncodingTask:
 
         # フラグ
         ## 主に FFmpeg の起動を高速化するための設定
-        ## max_interleave_delta: mux 時に影響するオプションで、増やしすぎると CM で詰まりがちになるが、減らしすぎると LL-HLS で音ズレしやすくなる
+        ## max_interleave_delta: mux 時に影響するオプションで、増やしすぎると CM で詰まりがちになる
         ## リトライなしの場合は 500K (0.5秒) に設定し、リトライ回数に応じて 100K (0.1秒) ずつ増やす
         max_interleave_delta = round(500 + (self._retry_count * 100))
         options.append(f'-fflags nobuffer -flags low_delay -max_delay 250000 -max_interleave_delta {max_interleave_delta}K -threads auto')
@@ -288,7 +289,7 @@ class LiveEncodingTask:
 
         # フラグ
         ## 主に HWEncC の起動を高速化するための設定
-        ## max_interleave_delta: mux 時に影響するオプションで、増やしすぎると CM で詰まりがちになるが、減らしすぎると LL-HLS で音ズレしやすくなる
+        ## max_interleave_delta: mux 時に影響するオプションで、増やしすぎると CM で詰まりがちになる
         ## リトライなしの場合は 500K (0.5秒) に設定し、リトライ回数に応じて 100K (0.1秒) ずつ増やす
         max_interleave_delta = round(500 + (self._retry_count * 100))
         options.append('-m avioflags:direct -m fflags:nobuffer+flush_packets -m flush_packets:1 -m max_delay:250000')
@@ -343,7 +344,7 @@ class LiveEncodingTask:
             options.append('--profile main')
         else:
             options.append('--profile high')
-        options.append(f'--interlace tff --dar 16:9')
+        options.append('--interlace tff --dar 16:9')
 
         ## 最大 GOP 長 (秒)
         ## 30fps なら ×30 、 60fps なら ×60 された値が --gop-len で使われる
@@ -370,9 +371,9 @@ class LiveEncodingTask:
         ## VCEEncC では --vpp-deinterlace 自体が使えないので、代わりに --vpp-afs を使う
         else:
             if encoder_type == 'QSVEncC':
-                options.append(f'--vpp-deinterlace normal')
+                options.append('--vpp-deinterlace normal')
             elif encoder_type == 'NVEncC' or encoder_type == 'VCEEncC':
-                options.append(f'--vpp-afs preset=default')
+                options.append('--vpp-afs preset=default')
             elif encoder_type == 'rkmppenc':
                 options.append('--vpp-deinterlace normal_i5')
             options.append(f'--avsync vfr --gop-len {int(gop_length_second * 30)}')
@@ -441,10 +442,10 @@ class LiveEncodingTask:
                         mirakurun_or_mirakc = 'mirakc'
                     tuners = response.json()
                 except httpx.NetworkError:
-                    logging.error(f'Failed to get tuner statuses from Mirakurun / mirakc. (Network Error)')
+                    logging.error('Failed to get tuner statuses from Mirakurun / mirakc. (Network Error)')
                     return False
                 except httpx.TimeoutException:
-                    logging.error(f'Failed to get tuner statuses from Mirakurun / mirakc. (Connection Timeout)')
+                    logging.error('Failed to get tuner statuses from Mirakurun / mirakc. (Connection Timeout)')
                     return False
 
                 # 指定されたチャンネルタイプが受信可能なチューナーが1つでも利用可能であれば True を返す
@@ -458,7 +459,7 @@ class LiveEncodingTask:
 
         # 空きチューナーは確保できなかったが、同じチャンネルが受信中であれば共聴することは可能なので warning に留める
         logging.warning(f'Failed to acquire a tuner from {mirakurun_or_mirakc}.')
-        logging.warning(f'If the same channel is being received, it can be shared with the same tuner.')
+        logging.warning('If the same channel is being received, it can be shared with the same tuner.')
         return False
 
 
@@ -729,6 +730,11 @@ class LiveEncodingTask:
 
         # ***** チューナーからの出力の読み込み → tsreadex・エンコーダーへの書き込み *****
 
+        # 実行中のタスクへの参照を保持しておく
+        ## run() の実行が完了するまで、ガベージコレクタによりタスクが勝手に破棄されることを防ぐ
+        ## ref: https://docs.astral.sh/ruff/rules/asyncio-dangling-task/
+        background_tasks: set[asyncio.Task[None]] = set()
+
         # チューナーからの放送波 TS の最終読み取り時刻 (単調増加時間)
         ## 単に時刻を比較する用途でしか使わないので、time.monotonic() から取得した単調増加時間が入る
         ## Unix Time とかではないので注意
@@ -777,7 +783,7 @@ class LiveEncodingTask:
                         ## 放送波の tsreadex への書き込みを最優先で行うため、非同期タスクとして実行する
                         ## ここで tsreadex への書き込みがブロックされると放送波の受信ループが止まり、ライブストリームの異常終了に繋がりかねない
                         if self.live_stream.psi_data_archiver is not None:
-                            asyncio.create_task(self.live_stream.psi_data_archiver.pushTSPacketData(chunk))
+                            background_tasks.add(asyncio.create_task(self.live_stream.psi_data_archiver.pushTSPacketData(chunk)))
 
                     # 並列タスク処理中に何らかの例外が発生した
                     # BrokenPipeError・asyncio.TimeoutError などが想定されるが、何が発生するかわからないためすべての例外をキャッチする
@@ -811,7 +817,7 @@ class LiveEncodingTask:
                 response.close()
 
         # タスクを非同期で実行
-        asyncio.create_task(Reader())
+        background_tasks.add(asyncio.create_task(Reader()))
 
         # ***** tsreadex・エンコーダーからの出力の読み込み → ライブストリームへの書き込み *****
 
@@ -901,8 +907,8 @@ class LiveEncodingTask:
                     break
 
         # タスクを非同期で実行
-        asyncio.create_task(Writer())
-        asyncio.create_task(SubWriter())
+        background_tasks.add(asyncio.create_task(Writer()))
+        background_tasks.add(asyncio.create_task(SubWriter()))
 
         # ***** エンコーダーの状態監視 *****
 
@@ -919,7 +925,7 @@ class LiveEncodingTask:
             ## ref: https://note.nkmk.me/python-pathlib-name-suffix-parent/
             count = 1
             encoder_log_path = LOGS_DIR / f'KonomiTV-Encoder-{self.live_stream.live_stream_id}.log'
-            while encoder_log_path.exists():
+            while await anyio.Path(str(encoder_log_path)).exists():
                 encoder_log_path = LOGS_DIR / f'KonomiTV-Encoder-{self.live_stream.live_stream_id}-{count}.log'
                 count += 1
 
@@ -1092,7 +1098,7 @@ class LiveEncodingTask:
                 await encoder_log.close()
 
         # タスクを非同期で実行
-        asyncio.create_task(EncoderObServer())
+        background_tasks.add(asyncio.create_task(EncoderObServer()))
 
         # ***** エンコードタスク全体の制御 *****
 
@@ -1157,7 +1163,7 @@ class LiveEncodingTask:
                     # Offline にしてエンコードタスクを停止する
                     ## mirakc はなぜかチューナー不足時に 503 ではなく 404 を返すことがある (バグ?)
                     if response.status == 503 or (response.status == 404 and mirakurun_or_mirakc == 'mirakc'):
-                        self.live_stream.setStatus('Offline', 'チューナーの起動に失敗しました。空きチューナーが不足しています。(E-12M)')
+                        self.live_stream.setStatus('Offline', 'チューナーの起動に失敗しました。空きチューナーが不足している可能性があります。(E-12M)')
                     elif response.status == 404:
                         self.live_stream.setStatus('Offline', f'現在このチャンネルは受信できません。{mirakurun_or_mirakc} 側に問題があるかもしれません。(HTTP Error {response.status}) (E-12M)')
                     else:
@@ -1295,16 +1301,16 @@ class LiveEncodingTask:
                 self.live_stream.tuner.unlock()
 
             # 再起動回数が最大再起動回数に達していなければ、再起動する
-            if self._retry_count < self._max_retry_count:
+            if self._retry_count < self.MAX_RETRY_COUNT:
                 self._retry_count += 1  # カウントを増やす
                 await asyncio.sleep(0.1)  # 少し待つ
-                asyncio.create_task(self.run())  # 新しいタスクを立ち上げる
+                background_tasks.add(asyncio.create_task(self.run()))  # 新しいタスクを立ち上げる
 
             # 最大再起動回数を使い果たしたので、Offline にする
             else:
 
                 # Offline に設定
-                if program_present is None or program_present.is_free == True:
+                if program_present is None or program_present.is_free is True:
                     # 無料番組
                     self.live_stream.setStatus('Offline', 'ライブストリームの再起動に失敗しました。(E-17)')
                 else:

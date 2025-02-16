@@ -128,13 +128,13 @@ async def TwitterPasswordAuthAPI(
                     if domain in ['.twitter.com', 'twitter.com', '.x.com', 'x.com']:
                         cookies[name] = value
             if not cookies:
-                logging.error(f'[TwitterRouter][TwitterPasswordAuthAPI] No valid cookies found in the provided cookies.txt')
+                logging.error('[TwitterRouter][TwitterPasswordAuthAPI] No valid cookies found in the provided cookies.txt')
                 raise HTTPException(
                     status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail = 'No valid cookies found in the provided cookies.txt',
                 )
         except Exception as ex:
-            error_message = f'Failed to parse cookies.txt: {str(ex)}'
+            error_message = f'Failed to parse cookies.txt: {ex!s}'
             logging.error(f'[TwitterRouter][TwitterPasswordAuthAPI] {error_message}')
             raise HTTPException(
                 status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -162,8 +162,7 @@ async def TwitterPasswordAuthAPI(
     try:
         verify_credentials = await asyncio.to_thread(tweepy_api.verify_credentials)
     except tweepy.TweepyException as ex:
-        logging.error(f'[TwitterRouter][TwitterPasswordAuthAPI] Failed to get user information for Twitter account @{twitter_account.screen_name}')
-        logging.error(ex)
+        logging.error(f'[TwitterRouter][TwitterPasswordAuthAPI] Failed to get user information for Twitter account @{twitter_account.screen_name}', exc_info=ex)
         raise HTTPException(
             status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail = 'Failed to get user information',
