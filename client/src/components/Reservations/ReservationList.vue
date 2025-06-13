@@ -57,7 +57,7 @@
             </div>
             <div class="reservation-list__grid-content">
                 <Reservation v-for="reservation in displayReservations" :key="reservation.id" :reservation="reservation"
-                    @deleted="handleReservationDeleted" />
+                    @deleted="handleReservationDeleted" @click="handleReservationClick" />
             </div>
         </div>
         <div class="reservation-list__pagination" v-if="!hidePagination && displayTotal > 0">
@@ -70,6 +70,13 @@
                 @update:model-value="$emit('update:page', $event)">
             </v-pagination>
         </div>
+
+        <!-- 録画予約詳細ドロワー -->
+        <ReservationDetailDrawer
+            v-model="drawerOpen"
+            :reservation="selectedReservation"
+            @deleted="handleReservationDeleted"
+            @updated="handleReservationSave" />
     </div>
 </template>
 <script lang="ts" setup>
@@ -77,6 +84,7 @@
 import { ref, watch } from 'vue';
 
 import Reservation from '@/components/Reservations/Reservation.vue';
+import ReservationDetailDrawer from '@/components/Reservations/ReservationDetailDrawer.vue';
 import { IReservation } from '@/services/Reservations';
 import Utils from '@/utils';
 
@@ -106,8 +114,8 @@ const props = withDefaults(defineProps<{
     showMoreButton: false,
     showBackButton: false,
     showEmptyMessage: true,
-    emptyIcon: 'fluent:warning-20-regular',
-    emptyMessage: '録画予約が見つかりませんでした。',
+    emptyIcon: 'fluent:timer-20-regular',
+    emptyMessage: 'まだ録画予約がありません。',
     emptySubMessage: '番組表から録画予約を追加できます。',
     isLoading: false,
 });
@@ -122,6 +130,10 @@ const sort_order = ref<'desc' | 'asc'>(props.sortOrder);
 const displayReservations = ref<IReservation[]>([...props.reservations]);
 // 内部で管理する合計数
 const displayTotal = ref<number>(props.total);
+
+// ドロワーの状態管理
+const drawerOpen = ref(false);
+const selectedReservation = ref<IReservation | null>(null);
 
 // props の page が変更されたら current_page を更新
 watch(() => props.page, (newPage) => {
@@ -151,14 +163,33 @@ const emit = defineEmits<{
     (e: 'delete', reservation_id: number): void;
 }>();
 
+// 予約がクリックされた時の処理
+const handleReservationClick = (reservation: IReservation) => {
+    selectedReservation.value = reservation;
+    drawerOpen.value = true;
+};
+
 // 予約が削除された時の処理
 const handleReservationDeleted = (id: number) => {
     // 内部の予約リストから削除された予約を除外
     displayReservations.value = displayReservations.value.filter(reservation => reservation.id !== id);
     // 合計数を1減らす
     displayTotal.value = Math.max(0, displayTotal.value - 1);
+    // ドロワーを閉じる
+    drawerOpen.value = false;
     // 親コンポーネントに削除イベントを発行
     emit('delete', id);
+};
+
+// 予約設定が保存された時の処理
+const handleReservationSave = (updatedReservation: IReservation) => {
+    // 内部の予約リストで該当する予約を更新
+    const index = displayReservations.value.findIndex(r => r.id === updatedReservation.id);
+    if (index !== -1) {
+        displayReservations.value[index] = updatedReservation;
+    }
+    // 選択中の予約も更新
+    selectedReservation.value = updatedReservation;
 };
 
 </script>
