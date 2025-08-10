@@ -7,8 +7,6 @@ from collections.abc import Coroutine
 from typing import Annotated, Any, Literal, cast
 
 import tweepy
-import tweepy.models
-import tweepy.parsers
 from app.routers.MisskeyRouter import MisskeyPost
 from fastapi import (
     APIRouter,
