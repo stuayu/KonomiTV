@@ -9,7 +9,8 @@
         "dev": "concurrently --raw \"npm:akebi\" \"vite\"",
         "build": "vue-tsc --noEmit && vite build",
         "preview": "concurrently --raw \"npm:akebi\" \"vite preview\"",
-        "lint": "eslint . --fix --ignore-path .gitignore"
+        "lint": "eslint . --fix --ignore-path .gitignore",
+        "typecheck": "vue-tsc --noEmit"
     },
     "engines": {
         "node": "^20.16.0||^22.0.0"
@@ -69,7 +70,7 @@
         "run-script-os": "^1.1.6",
         "sass": "1.77.6",
         "typescript": "~5.5.4",
-        "vite": "^5.4.19",
+        "vite": "^5.4.21",
         "vite-plugin-comlink": "^5.0.1",
         "vite-plugin-pwa": "^0.20.1",
         "vite-plugin-vuetify": "^2.0.4",
