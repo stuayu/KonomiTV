@@ -150,7 +150,8 @@ Windows では Windows サービス、Linux では pm2 サービスとして動�
 - ログメッセージに関しては文字化けを避けるため、必ず英語で記述する
 - それ以外のコーディングスタイルは、原則変更箇所周辺のコードスタイルに合わせる
 - 不要な薄いラッパーや別名関数は作らず、責務のあるコンポーネントだけを追加する。
-- コメントは冗長なくらいでちょうどよい。条件分岐・ループ・例外処理の直前にはその意図を書き、Python では `__init__()` で代入するインスタンス変数には「保持する情報」「参照されるメソッド」「前提条件」を必ずコメントとして記す。クラス Docstring には責務のみを記載し、引数説明は `__init__()` の Docstring に集約する。
+- コメントは冗長なくらいでちょうどよい。条件分岐・ループ・例外処理の直前にはその意図を書き、Python では `__init__()` で代入するインスタンス変数には「保持する情報」「参照されるメソッド」「前提条件」を必ずコメントとして記す。クラス Docstring には責務のみを記載し、引数説明は `__init__()` の Docstring に集約する
+- Enum・Literal・Union 型の文字列表現は `tweet_capture_watermark_position: 'None' | 'TopLeft' | 'TopRight' | 'BottomLeft' | 'BottomRight';` のように基本的に UpperCamelCase で命名する必要がある
 - 通常の Web サービスではないかなり特殊なソフトウェアなので、コンテキストとして分からないことがあれば別途 Readme.md を読むか、私に質問すること
 
 ### Python コード
@@ -176,8 +177,11 @@ Windows では Windows サービス、Linux では pm2 サービスとして動�
 - 文字列にはシングルクォートを用いる
 - 新規で実装する箇所に関しては Vue 3 Composition API パターンに従う
   - Vue.js 2 から移行した関係で Options API で書かれているコンポーネントがあるが、それらは Options API のまま維持する
+- 新規で実装する Vue 3 Composition API のコンポーネントでは、原則として変数を lowerCamelCase で命名する
+  - FastAPI サーバーでは snake_case で命名している関係で外部 API のフィールドは全てスネークケースになっているが、これはそのまま参照して良い
 - TypeScript による型安全性を確保する
 - コンポーネント属性は可能な限り1行に記述 (約100文字まで)
+- 必ず day.js を utils/index.ts からインポートして使うこと！！！new Date() を絶対に使うな！！！
 
 ### CSS / SCSS スタイリング
 - このプロジェクトで使用している色 (CSS 変数) などは `client/src/App.vue` や `client/src/plugins/vuetify.ts` に定義しているので、それを参照すること
