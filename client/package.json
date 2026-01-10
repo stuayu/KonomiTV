@@ -12,9 +12,6 @@
         "lint": "eslint . --fix --ignore-path .gitignore",
         "typecheck": "vue-tsc --noEmit"
     },
-    "engines": {
-        "node": "^20.16.0||^22.0.0"
-    },
     "type": "module",
     "dependencies": {
         "@github/mini-throttle": "^2.1.1",
