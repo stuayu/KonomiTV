@@ -69,6 +69,10 @@ class APIClient {
 
         // 外部サイトへの HTTP/HTTPS リクエストでは実行しない
         if (request.url?.startsWith('http') === false) {
+            
+            // ★ Cloudflare Access 用：AJAX として扱わせ、期限切れ時に 401 を返させる
+            // Cloudflare公式の推奨手法（SPA/AJAX向け）[1](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)
+            request.headers['X-Requested-With'] = 'XMLHttpRequest';
 
             // アクセストークンが取得できたら (=ログインされていれば)
             // 取得したアクセストークンを Authorization ヘッダーに Bearer トークンとしてセット
@@ -101,6 +105,11 @@ class APIClient {
         if (result instanceof AxiosError) {
             console.error(result);
 
+            // Access セッション切れ（401/403）なら再認証へ
+            if (result.response && (result.response.status === 401 || result.response.status === 403)) {
+                APIClient.triggerAccessReauth(`HTTP ${result.response.status}`);
+            }
+
             // エラーレスポンスがあれば、エラー内容と AxiosError を IErrorResponse に入れて返す
             if (result.response) {
                 return {
@@ -113,6 +122,11 @@ class APIClient {
 
             // エラーレスポンスがない場合は、AxiosError のみを IErrorResponse に入れて返す
             } else {
+                // ERR_NETWORK など（Access リダイレクトが cross-origin で CORS 失敗等の可能性も）
+                // → ここでも再認証を試す（過剰なら条件を絞る）
+                if (result.code === AxiosError.ERR_NETWORK) {
+                    APIClient.triggerAccessReauth('ERR_NETWORK');
+                }
                 return {
                     type: 'error',
                     status: NaN,  // ステータスコードは取得できないので NaN にする
@@ -124,6 +138,20 @@ class APIClient {
 
         // 正常にレスポンスが返ってきた場合は ISuccessResponse を返す
         } else {
+            // ------- 成功（AxiosResponse） -------
+            // 302→ログインHTML(200) 化を拾うフォールバック
+            if (APIClient.looksLikeAccessHtml(result)) {
+                APIClient.triggerAccessReauth('HTML response (possible Access block)');
+                // 呼び出し側が JSON として扱って壊れるのを避け、擬似エラーで返す選択もあり
+                return {
+                    type: 'error',
+                    status: 401,
+                    headers: result.headers,
+                    data: { detail: 'Cloudflare Access session expired (HTML returned)' },
+                    error: new AxiosError('Access HTML returned') as any,
+                };
+            }
+
             return {
                 type: 'success',
                 headers: result.headers,
@@ -278,6 +306,57 @@ class APIClient {
             }
         }
     }
+
+    private static _reauthInProgress = false;
+
+    /** Cloudflare Access の再認証をトップレベル遷移で発火 */
+    private static triggerAccessReauth(reason: string) {
+        // 連打防止
+        if (APIClient._reauthInProgress) return;
+        APIClient._reauthInProgress = true;
+
+        // Access のログイン/ログアウト配下にいるならループ防止
+        const p = window.location.pathname;
+        if (p.startsWith('/cdn-cgi/access/')) {
+            APIClient._reauthInProgress = false;
+            return;
+        }
+
+        // 画面に出したいなら軽く通知してから遷移（すぐ消えることはある）
+        try { Message.error(`認証セッションが切れました。再認証します。（${reason}）`); } catch {}
+
+        // ★最も堅い：同じURLへトップレベルで再アクセス
+        // Access が必要ならログインへ誘導される[1](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)[2](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)
+        setTimeout(() => {
+            window.location.assign(window.location.href);
+        }, 150);
+    }
+
+    /** Access ブロック由来の “HTML返却” をざっくり判定 */
+    private static looksLikeAccessHtml(res: AxiosResponse<any>): boolean {
+        const headersAny = res.headers as any;
+        const ct = (typeof headersAny.get === 'function'
+            ? headersAny.get('content-type')
+            : headersAny['content-type'] ?? headersAny['Content-Type'] ?? '') as string;
+
+        const isHtml = typeof ct === 'string' && ct.includes('text/html');
+        if (!isHtml) return false;
+
+        // Axios browser: XMLHttpRequest の responseURL が取れることが多い
+        const responseURL: string | undefined =
+        (res.request && (res.request.responseURL as string)) ? res.request.responseURL : undefined;
+
+        // Access 関連パスが見えるなら濃厚（/cdn-cgi は Cloudflare 管理）[3](https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/)
+        if (responseURL && responseURL.includes('/cdn-cgi/access/')) return true;
+
+        // body に Access 固有の文字列が混ざるケースもあるので軽く見る（保険）
+        const body = res.data;
+        if (typeof body === 'string' && body.includes('cloudflareaccess')) return true;
+        if (typeof body === 'string' && body.includes('/cdn-cgi/access/')) return true;
+
+        return false;
+    }
+
 }
 
 export default APIClient;

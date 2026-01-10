@@ -126,6 +126,10 @@ export default defineConfig({
                 navigateFallbackDenylist: [/^\/api/, /^\/cdn-cgi/],
                 // キャッシュするファイルの最大サイズ
                 maximumFileSizeToCacheInBytes: 1024 * 1024 * 15,  // 15MB
+                runtimeCaching: [
+                    { urlPattern: ({url}) => url.pathname.startsWith('/api/'), handler: 'NetworkOnly' },
+                    { urlPattern: ({url}) => url.pathname.startsWith('/cdn-cgi/'), handler: 'NetworkOnly' },
+                ],
             }
         }),
     ],
