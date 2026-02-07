@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import io
 import json
+import random
 from collections.abc import Coroutine
 from typing import Annotated, Any, Literal
 
@@ -364,6 +365,9 @@ async def TwitterTweetAPI(
             is_success = False,
             detail = error_message,
         )
+
+    # スパム判定対策のため、ランダムに2〜5秒待機
+    await asyncio.sleep(random.uniform(2, 5))
 
     try:
         # misskeyに投稿
