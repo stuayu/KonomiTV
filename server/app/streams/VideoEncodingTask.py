@@ -303,7 +303,7 @@ class VideoEncodingTask:
                     options.append('--vpp-yadif mode=bob')
                 elif encoder_type == 'rkmppenc':
                     options.append('--vpp-deinterlace bob_i5')
-                options.append(f'--avsync vfr --gop-len {int(self.GOP_LENGTH_SECOND * 60)}')
+                options.append(f'--avsync vfr --timestamp-passthrough --gop-len {int(self.GOP_LENGTH_SECOND * 60)}')
             ## インターレース解除 (60i → 30p (フレームレート: 30fps))
             ## NVEncC の --vpp-deinterlace normal は GPU 機種次第では稀に解除漏れのジャギーが入るらしいので、代わりに --vpp-afs を使う
             ## NVIDIA GPU は当然ながら Intel の内蔵 GPU よりも性能が高いので、GPU フィルタを使ってもパフォーマンスに問題はないと判断
@@ -315,12 +315,12 @@ class VideoEncodingTask:
                     options.append('--vpp-afs preset=default,coeff_shift=0')
                 elif encoder_type == 'rkmppenc':
                     options.append('--vpp-deinterlace normal_i5')
-                options.append(f'--avsync vfr --gop-len {int(self.GOP_LENGTH_SECOND * 30)}')
+                options.append(f'--avsync vfr --timestamp-passthrough --gop-len {int(self.GOP_LENGTH_SECOND * 30)}')
         ## プログレッシブ映像
         ## プログレッシブ映像の場合は 60fps 化する方法はないため、無視して入力ファイルと同じ fps でエンコードする
         elif self.video_stream.recorded_program.recorded_video.video_scan_type == 'Progressive':
             int_fps = math.ceil(self.video_stream.recorded_program.recorded_video.video_frame_rate)  # 29.97 -> 30
-            options.append(f'--avsync vfr --gop-len {int(self.GOP_LENGTH_SECOND * int_fps)}')
+            options.append(f'--avsync vfr --timestamp-passthrough --gop-len {int(self.GOP_LENGTH_SECOND * int_fps)}')
 
         ## 指定された品質の解像度が 1440×1080 (1080p) かつ入力ストリームがフル HD (1920×1080) の場合のみ、
         ## 特別に縦解像度を 1920 に変更してフル HD (1920×1080) でエンコードする
