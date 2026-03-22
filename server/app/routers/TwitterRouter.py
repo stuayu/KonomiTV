@@ -312,82 +312,32 @@ async def TwitterTweetAPI(
     # アップロードした画像の media_id のリスト
     media_ids: list[str] = []
 
-    try:
-        # 画像をアップロードするタスク
-        # TODO: 本来はここもヘッドレスブラウザ経由で送信すべきだが、おそらく画像の受け渡しが面倒なのと、
-        # upload.x.com のみ他の API と異なり v1.1 時代からほぼそのままで Bot 対策も比較的緩そうなので当面これで行く…
-        logging.info(f'[TwitterRouter][TwitterTweetAPI] Uploading {len(images)} images...')
-        tweepy_api = twitter_account.getTweepyAPI()
-        misskey = MisskeyPost()
+    misskey = MisskeyPost()
 
-        # 画像をアップロードするタスク
-        image_upload_task: list[Coroutine[Any, Any, Any | None]] = []
-        upload_tasks_mk: list[str] = []
-        dt_now = datetime.datetime.now()
+    # 画像をアップロードするタスク
+    upload_tasks_mk: list[str] = []
+    dt_now = datetime.datetime.now()
 
-        for image in images:
-            # `image.file` の内容をメモリに読み取る
-            image.file.seek(0)
-            file_content = image.file.read()
-            
-            # メモリ内のファイルオブジェクトを作成
-            image_file_copy_misskey = io.BytesIO(file_content)
-            image_file_copy_twitter = io.BytesIO(file_content)
-            
-            # `io.BytesIO` オブジェクトは、ファイルの位置をリセットする必要があります
-            image_file_copy_misskey.seek(0)
-            image_file_copy_twitter.seek(0)
-            
-            upload_tasks_mk.append(await misskey.uploadPictures(file=image_file_copy_misskey, filename=dt_now.strftime("%Y年%m月%d日 %H:%M:%S")))
-            image_upload_task.append(asyncio.to_thread(tweepy_api.media_upload,
-                filename = dt_now.strftime("%Y年%m月%d日 %H:%M:%S"),
-                file = image_file_copy_twitter,
-                # Twitter Web App の挙動に合わせて常にチャンク送信方式でアップロードする
-                chunked = True,
-                # Twitter Web App の挙動に合わせる
-                media_category = 'tweet_image',
-            ))
-        await asyncio.sleep(0)
+    for image in images:
+        # `image.file` の内容をメモリに読み取る
+        image.file.seek(0)
+        file_content = image.file.read()
+        
+        # メモリ内のファイルオブジェクトを作成
+        image_file_copy_misskey = io.BytesIO(file_content)
+        
+        # `io.BytesIO` オブジェクトは、ファイルの位置をリセットする必要があります
+        image_file_copy_misskey.seek(0)
+        
+        upload_tasks_mk.append(await misskey.uploadPictures(file=image_file_copy_misskey, filename=dt_now.strftime("%Y年%m月%d日 %H:%M:%S")))
 
-        # 画像を Twitter にアップロード
-        ## asyncio.gather() で同時にアップロードし、ツイートをより早く送信できるように
-        ## ref: https://developer.twitter.com/ja/docs/media/upload-media/api-reference/post-media-upload-init
-        for image_upload_result in await asyncio.gather(*image_upload_task):
-            if image_upload_result is not None:
-                logging.info(f'[TwitterRouter][TwitterTweetAPI] Uploaded image. [media_id: {image_upload_result.media_id}]')
-                media_ids.append(str(image_upload_result.media_id))
+    await asyncio.sleep(0)
 
-    # 画像のアップロードに失敗した
-    except tweepy.HTTPException as ex:
-        if len(ex.api_codes) > 0 and len(ex.api_messages) > 0:
-            # 定義されていないエラーコードの時は Twitter API から返ってきたエラーメッセージをそのまま返す
-            error_message = 'ツイート画像のアップロードに失敗しました。' + \
-                TwitterGraphQLAPI.ERROR_MESSAGES.get(ex.api_codes[0], f'Code: {ex.api_codes[0]} / Message: {ex.api_messages[0]}')
-        else:
-            error_message = f'ツイート画像のアップロード中に Twitter API から HTTP {ex.response.status_code} エラーが返されました。'
-            if len(ex.api_errors) > 0:
-                error_message += f'Message: {ex.api_errors[0]}'  # エラーメッセージがあれば追加
-        return schemas.TwitterAPIResult(
-            is_success = False,
-            detail = error_message,
-        )
+    # misskeyに投稿
+    await misskey.sendAttachedMessage(tweet, upload_tasks_mk)
 
-    # スパム判定対策のため、ランダムに2〜5秒待機
-    await asyncio.sleep(random.uniform(2, 5))
-
-    try:
-        # misskeyに投稿
-        await misskey.sendAttachedMessage(tweet, upload_tasks_mk)
-        # GraphQL API を使ってツイートを送信し、結果をそのまま返す
-        await TwitterGraphQLAPI(twitter_account).createTweet(tweet, media_ids)
-    except:
-        # エラーを握りつぶす
-        pass
-
-    return {
-        "is_success": True,
-        "detail": "ツイートの送信処理を実行しました。",
-    }
+    # Twitter Web App 経由でツイートを送信し、結果をそのまま返す
+    return await TwitterGraphQLAPI(twitter_account).createTweet(tweet, images)
 
 
 @router.put(
