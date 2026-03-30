@@ -9,7 +9,6 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
 import httpx
-import tweepy
 from app.routers.MisskeyRouter import MisskeyPost
 from fastapi import (
     APIRouter,
