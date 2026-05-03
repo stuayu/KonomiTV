@@ -253,7 +253,10 @@ version = "4.13.0"
 description = "High-level concurrency and networking framework on top of asyncio or Trio"
 optional = false
 python-versions = ">=3.10"
+<<<<<<< HEAD
 groups = ["main"]
+=======
+>>>>>>> master
 files = [
     {file = "anyio-4.13.0-py3-none-any.whl", hash = "sha256:08b310f9e24a9594186fd75b4f73f4a4152069e3853f1ed8bfbf58369f4ad708"},
     {file = "anyio-4.13.0.tar.gz", hash = "sha256:334b70e641fd2221c1505b3890c69882fe4a2df910cba14d97019b90b24439dc"},
@@ -1708,8 +1711,13 @@ files = [
 
 [package.extras]
 dev = ["build (==1.4.3)", "lxml (==6.1.0)", "mypy (==1.19.1)", "ruff (==0.15.11)", "twine (==6.2.0)"]
+<<<<<<< HEAD
 docs = ["myst-parser (==5.0.0) ; python_version >= \"3.12\"", "shibuya (==2026.1.9) ; python_version >= \"3.12\"", "sphinx (==9.1.0) ; python_version >= \"3.12\"", "sphinx-copybutton (==0.5.2) ; python_version >= \"3.12\"", "sphinx-new-tab-link (==0.8.1) ; python_version >= \"3.12\""]
 tests = ["numpy (==2.4.3) ; sys_platform == \"linux\" and python_version == \"3.13\"", "pillow (==12.1.1) ; sys_platform == \"linux\" and python_version == \"3.13\"", "pytest (==8.4.2) ; python_version == \"3.9\"", "pytest (==9.0.2) ; python_version > \"3.9\"", "pytest-cov (==7.1.0)", "pytest-rerunfailures (==16.0.1) ; python_version == \"3.9\"", "pytest-rerunfailures (==16.1) ; python_version > \"3.9\"", "pyvirtualdisplay (==3.0) ; sys_platform == \"linux\""]
+=======
+docs = ["myst-parser (==5.0.0)", "shibuya (==2026.1.9)", "sphinx (==9.1.0)", "sphinx-copybutton (==0.5.2)", "sphinx-new-tab-link (==0.8.1)"]
+tests = ["numpy (==2.4.3)", "pillow (==12.1.1)", "pytest (==8.4.2)", "pytest (==9.0.2)", "pytest-cov (==7.1.0)", "pytest-rerunfailures (==16.0.1)", "pytest-rerunfailures (==16.1)", "pyvirtualdisplay (==3.0)"]
+>>>>>>> master
 
 [[package]]
 name = "multidict"
@@ -2684,7 +2692,10 @@ version = "2.20.0"
 description = "Pygments is a syntax highlighting package written in Python."
 optional = false
 python-versions = ">=3.9"
+<<<<<<< HEAD
 groups = ["main"]
+=======
+>>>>>>> master
 files = [
     {file = "pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176"},
     {file = "pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f"},
@@ -2694,6 +2705,7 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
+<<<<<<< HEAD
 name = "pymediainfo"
 version = "6.1.0"
 description = "A Python wrapper for the mediainfo library."
@@ -2708,6 +2720,8 @@ files = [
 ]
 
 [[package]]
+=======
+>>>>>>> master
 name = "pypika-tortoise"
 version = "0.6.5"
 description = "Forked from pypika and streamline just for tortoise-orm"
@@ -3010,7 +3024,10 @@ version = "2.33.1"
 description = "Python HTTP for Humans."
 optional = false
 python-versions = ">=3.10"
+<<<<<<< HEAD
 groups = ["main"]
+=======
+>>>>>>> master
 files = [
     {file = "requests-2.33.1-py3-none-any.whl", hash = "sha256:4e6d1ef462f3626a1f0a0a9c42dd93c63bad33f9f1c1937509b8c5c8718ab56a"},
     {file = "requests-2.33.1.tar.gz", hash = "sha256:18817f8c57c6263968bc123d237e3b8b08ac046f5456bd1e307ee8f4250d3517"},
@@ -3749,8 +3766,11 @@ version = "0.6.2"
 description = "Windows version of uvloop"
 optional = false
 python-versions = ">=3.8.0"
+<<<<<<< HEAD
 groups = ["main"]
 markers = "sys_platform == \"win32\""
+=======
+>>>>>>> master
 files = [
     {file = "winloop-0.6.2-cp310-cp310-win_amd64.whl", hash = "sha256:1226c10c17d792f7bdc66d34ff7cadca35a92eb1b1297c1979b0336e3d980f27"},
     {file = "winloop-0.6.2-cp310-cp310-win_arm64.whl", hash = "sha256:2fe075ee5f9f7d28f637414e1060a583e5be38a7f569aeb6f163287f9453f65b"},
@@ -4044,4 +4064,8 @@ websockets = ">=14.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.12"
+<<<<<<< HEAD
 content-hash = "14a5405c5e4b6ed10ea51746d17078afb5435c6da30386d4b7d3cd92897a91b3"
+=======
+content-hash = "d0e8b31eb288cfe7863c63e2a02fcaea3cf2a6dc52e407b2d433d4037b588212"
+>>>>>>> master
