@@ -24,6 +24,7 @@ from app.models.Channel import Channel
 from app.models.RecordedProgram import RecordedProgram
 from app.models.RecordedVideo import RecordedVideo
 from app.streams.VideoSegmentPlanner import VideoSegmentPlanner
+from app.utils import ShutdownProcessPoolExecutor
 from app.utils.DriveIOLimiter import DriveIOLimiter
 from app.utils.ProcessLimiter import ProcessLimiter
 from app.utils.TSInformation import TSInformation
@@ -627,26 +628,34 @@ class RecordedScanTask:
 
                 # ProcessPoolExecutor を使い、別プロセス上でメタデータを解析
                 ## メタデータ解析処理は実装上同期 I/O で実装されており、また CPU-bound な処理のため、別プロセスで実行している
-                ## with 文で括ることで、with 文を抜けたときに ProcessPoolExecutor がクリーンアップされるようにする
-                ## さもなければサーバーの終了後もプロセスが残り続けてゾンビプロセス化し、メモリリークを引き起こしてしまう
+                ## コンテキストマネージャーはキャンセル時にも子プロセス終了を同期的に待つため、イベントループ上では使わない
+                ## 正常完了時は明示的に待ってクリーンアップし、リクエスト切断時だけ待機なしで解放処理へ進める
                 loop = asyncio.get_running_loop()
                 analyzer = MetadataAnalyzer(pathlib.Path(str(file_path)))  # anyio.Path -> pathlib.Path に変換
+                executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
+                should_wait_executor = True
                 try:
-                    with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
-                        recorded_program = await loop.run_in_executor(executor, analyzer.analyze)
-                    if recorded_program is None:
-                        logging.error(f'{file_path}: Failed to analyze metadata.')
-                        # メタデータ解析に失敗したがこの時点ですでに DB にエントリが存在している場合は、UI から判別できるようステータスを更新する
-                        ## 本来メタデータ解析に失敗した録画ファイルは DB には登録されないが、「録画中は問題なく解析できていたが、録画完了後に解析できなくなった」
-                        ## といったシチュエーションも稀に考えられなくもないため、そうした場合の保険として実装した
-                        if existing_recorded_video_summary is not None:
-                            await RecordedVideo.filter(id=existing_recorded_video_summary.id).update(status='AnalysisFailed')
-                            existing_recorded_video_summary.status = 'AnalysisFailed'
-                        self._recording_files.pop(file_path, None)  # もし録画中扱いであればここで削除
-                        return
+                    recorded_program = await loop.run_in_executor(executor, analyzer.analyze)
+                except asyncio.CancelledError:
+                    should_wait_executor = False
+                    await ShutdownProcessPoolExecutor(executor, is_cancelled=True)
+                    raise
                 except Exception as ex:
                     logging.error(f'{file_path}: Error analyzing metadata:', exc_info=ex)
                     # メタデータ解析中に例外が発生した場合も、この時点ですでに DB にエントリが存在している場合は、UI から判別できるようステータスを更新する
+                    if existing_recorded_video_summary is not None:
+                        await RecordedVideo.filter(id=existing_recorded_video_summary.id).update(status='AnalysisFailed')
+                        existing_recorded_video_summary.status = 'AnalysisFailed'
+                    self._recording_files.pop(file_path, None)  # もし録画中扱いであればここで削除
+                    return
+                finally:
+                    if should_wait_executor is True:
+                        await ShutdownProcessPoolExecutor(executor, is_cancelled=False)
+                if recorded_program is None:
+                    logging.error(f'{file_path}: Failed to analyze metadata.')
+                    # メタデータ解析に失敗したがこの時点ですでに DB にエントリが存在している場合は、UI から判別できるようステータスを更新する
+                    ## 本来メタデータ解析に失敗した録画ファイルは DB には登録されないが、「録画中は問題なく解析できていたが、録画完了後に解析できなくなった」
+                    ## といったシチュエーションも稀に考えられなくもないため、そうした場合の保険として実装した
                     if existing_recorded_video_summary is not None:
                         await RecordedVideo.filter(id=existing_recorded_video_summary.id).update(status='AnalysisFailed')
                         existing_recorded_video_summary.status = 'AnalysisFailed'
@@ -951,6 +960,7 @@ class RecordedScanTask:
             db_recorded_video.video_frame_rate = recorded_program.recorded_video.video_frame_rate
             db_recorded_video.video_resolution_width = recorded_program.recorded_video.video_resolution_width
             db_recorded_video.video_resolution_height = recorded_program.recorded_video.video_resolution_height
+            db_recorded_video.has_video_stream_changes = recorded_program.recorded_video.has_video_stream_changes
             db_recorded_video.primary_audio_codec = recorded_program.recorded_video.primary_audio_codec
             db_recorded_video.primary_audio_channel = recorded_program.recorded_video.primary_audio_channel
             db_recorded_video.primary_audio_sampling_rate = recorded_program.recorded_video.primary_audio_sampling_rate
@@ -1015,6 +1025,7 @@ class RecordedScanTask:
         logging.info('Starting keyframe to segment map migration...')
 
         migrated_count = 0
+        repaired_count = 0
         skipped_count = 0
         last_seen_id = 0
         next_progress_log_count = 500
@@ -1039,18 +1050,38 @@ class RecordedScanTask:
 
             for video_row in video_rows:
                 last_seen_id = video_row['id']
-                key_frames = video_row['key_frames']
-                if not isinstance(key_frames, list) or len(key_frames) == 0:
-                    continue
 
                 try:
                     segment_map = video_row['segment_map']
                     if not isinstance(segment_map, list):
                         segment_map = []
 
+                    is_broken_segment_map = False
+                    # 旧変換ロジックで同じ入力位置が連続保存された MPEG-TS は、再生時に同じ映像を繰り返す
+                    ## key_frames が既に空でも検出できるよう、移行対象判定より先に segment_map を確認する
+                    if (
+                        video_row['container_format'] == 'MPEG-TS' and
+                        len(segment_map) > 0 and
+                        VideoSegmentPlanner.isSegmentMapProbablyBroken(cast(list[schemas.SegmentMapEntry], segment_map)) is True
+                    ):
+                        is_broken_segment_map = True
+
+                    key_frames = video_row['key_frames']
+                    if not isinstance(key_frames, list) or len(key_frames) == 0:
+                        # 壊れた既存キャッシュだけを空に戻し、通常の未キャッシュ状態としてオンデマンド探索へ戻す
+                        ## key_frames が空の録画は旧データから再変換できないため、誤った値を温存しない
+                        if is_broken_segment_map is True:
+                            await RecordedVideo.filter(id=video_row['id']).update(segment_map = [])
+                            repaired_count += 1
+                            logging.warning(
+                                f'{video_row["file_path"]}: Broken segment map was cleared. '
+                                f'[video_id: {video_row["id"]}]'
+                            )
+                        continue
+
                     # TS コンテナは既存 key_frames をオンデマンド探索と同じ規則のキャッシュへ変換できる
                     if video_row['container_format'] == 'MPEG-TS':
-                        if len(segment_map) == 0:
+                        if len(segment_map) == 0 or is_broken_segment_map is True:
                             video_frame_rate = video_row['video_frame_rate']
                             # 旧 DB に壊れたフレームレートが混じっている場合、セグメント長を復元できないため移行対象から外す
                             if (
@@ -1091,11 +1122,12 @@ class RecordedScanTask:
                     logging.error(f'{video_row["file_path"]}: Failed to migrate keyframes to segment map:', exc_info=ex)
 
             # 大量の録画を持つ環境では起動直後に沈黙すると不安になるため、500件ごとに進捗をログへ出す
-            processed_count = migrated_count + skipped_count
+            processed_count = migrated_count + repaired_count + skipped_count
             if processed_count >= next_progress_log_count:
                 logging.info(
                     f'Keyframe to segment map migration progress. '
-                    f'[processed: {processed_count}, migrated: {migrated_count}, skipped: {skipped_count}]'
+                    f'[processed: {processed_count}, migrated: {migrated_count}, repaired: {repaired_count}, '
+                    f'skipped: {skipped_count}]'
                 )
                 next_progress_log_count += 500
 
@@ -1104,7 +1136,7 @@ class RecordedScanTask:
 
         logging.info(
             f'Keyframe to segment map migration completed. '
-            f'[migrated: {migrated_count}, skipped: {skipped_count}]'
+            f'[migrated: {migrated_count}, repaired: {repaired_count}, skipped: {skipped_count}]'
         )
 
 

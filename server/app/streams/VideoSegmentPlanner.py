@@ -61,6 +61,7 @@ class VideoSegmentPlanner:
             return []
 
         segment_duration_seconds = VideoSegmentPlanner.computeSegmentDurationSeconds(video_frame_rate)
+        segment_duration_ticks = round(segment_duration_seconds * ts.HZ)
         segment_count = max(1, math.ceil(duration_seconds / segment_duration_seconds))
         source_base_dts = usable_key_frames[0]['dts']
         dts_list = [key_frame['dts'] for key_frame in usable_key_frames]
@@ -75,13 +76,65 @@ class VideoSegmentPlanner:
             if key_frame_index < 0:
                 key_frame_index = 0
             key_frame = usable_key_frames[key_frame_index]
-            segment_map.append(SegmentMapEntry(
+
+            # 負の値は要求時刻より後ろのキーフレームなので、セグメント冒頭の映像を欠く
+            keyframe_age_ticks = target_dts - key_frame['dts']
+            if keyframe_age_ticks < 0:
+                continue
+
+            # 旧 key_frames が途中で途切れている録画では、最後のキーフレームが残り全セグメントへ割り当たる
+            ## 後続キーフレームが存在する場合は長い GOP 内に目標時刻があるだけなので、キャッシュとして採用する
+            if keyframe_age_ticks >= segment_duration_ticks and key_frame_index == len(usable_key_frames) - 1:
+                continue
+
+            segment_map_entry = SegmentMapEntry(
                 sequence_index = sequence_index,
                 source_file_position = key_frame['offset'],
                 source_start_dts = key_frame['dts'],
-            ))
+            )
+
+            # 同じ入力位置を複数セグメントへ保存すると、シーク時に同一範囲を何度もエンコードしてしまうため、
+            # 長い GOP や PID 切替直前の不自然な key_frames は、該当シーケンスだけオンデマンド探索へ任せる
+            if (
+                any(
+                    saved_segment_map_entry['source_file_position'] == segment_map_entry['source_file_position'] and
+                    saved_segment_map_entry['source_start_dts'] == segment_map_entry['source_start_dts']
+                    for saved_segment_map_entry in segment_map
+                ) is True
+            ):
+                continue
+
+            segment_map.append(segment_map_entry)
 
         return segment_map
+
+
+    @staticmethod
+    def isSegmentMapProbablyBroken(segment_map: list[SegmentMapEntry]) -> bool:
+        """
+        連続セグメントが同じ入力開始位置を指している segment_map かどうかを判定する
+
+        Args:
+            segment_map (list[SegmentMapEntry]): DB に保存されているセグメント開始位置キャッシュ
+
+        Returns:
+            bool: 連続セグメントの重複が見つかった場合は True
+        """
+
+        previous_entry: SegmentMapEntry | None = None
+        for segment_map_entry in sorted(segment_map, key=lambda entry: entry['sequence_index']):
+            # 同じ開始位置が隣接セグメントに並ぶと、HLS 上は別セグメントでも同じ入力範囲から再エンコードされる
+            ## 旧変換ロジック由来の壊れたキャッシュだけを検出し、離れたシーク履歴の偶然一致は触らない
+            if (
+                previous_entry is not None and
+                previous_entry['sequence_index'] == segment_map_entry['sequence_index'] - 1 and
+                previous_entry['source_file_position'] == segment_map_entry['source_file_position'] and
+                previous_entry['source_start_dts'] == segment_map_entry['source_start_dts']
+            ):
+                return True
+            previous_entry = segment_map_entry
+
+        return False
 
 
     @staticmethod
