@@ -274,14 +274,17 @@ class User(PydanticModel):
     niconico_user_premium: bool | None
     twitter_accounts: list[TwitterAccount]  # 追加カラム
     bluesky_accounts: list[BlueskyAccount]  # 追加カラム
+    misskey_accounts: list[MisskeyAccount]  # 追加カラム
     account_links: list[AccountLink]  # 追加カラム
     created_at: datetime
     updated_at: datetime
 
 class AccountLink(PydanticModel):
     id: int
-    twitter_account: TwitterAccount
-    bluesky_account: BlueskyAccount
+    # Twitter / Bluesky / Misskey のうち紐付け対象のサービスは非 null、それ以外は null になる
+    twitter_account: TwitterAccount | None
+    bluesky_account: BlueskyAccount | None
+    misskey_account: MisskeyAccount | None
     created_at: datetime
     updated_at: datetime
 
@@ -304,6 +307,26 @@ class BlueskyAccount(PydanticModel):
     handle: str
     name: str
     icon_url: str
+    created_at: datetime
+    updated_at: datetime
+
+class MisskeyAccount(PydanticModel):
+    id: int
+    # Misskey インスタンスのホスト名 (例: "misskey.io")
+    instance_url: str
+    # Misskey 側のユーザー ID
+    misskey_user_id: str
+    # @username 部分 (@ は含まない)
+    username: str
+    # 表示名
+    name: str
+    icon_url: str
+    # ノートのデフォルト公開範囲
+    visibility: str
+    # 投稿先のチャンネル ID (None の場合はチャンネルなしで投稿)
+    channel_id: str | None
+    # 画像アップロード先のドライブフォルダ ID (None の場合はルートに保存)
+    drive_folder_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -376,8 +399,10 @@ class UserUpdateRequestForAdmin(BaseModel):
     is_admin: bool | None = None
 
 class AccountLinkCreateRequest(BaseModel):
-    twitter_account_id: int
-    bluesky_account_id: int
+    # 紐付けるサービスに対応するアカウント ID を渡す。Twitter / Bluesky / Misskey のうち 2 つ以上が必須
+    twitter_account_id: int | None = None
+    bluesky_account_id: int | None = None
+    misskey_account_id: int | None = None
 
 # ***** Twitter 連携 *****
 
@@ -418,6 +443,18 @@ class BrowserEnvironmentUserAgentData(TypedDict):
 class BlueskyAuthRequest(BaseModel):
     handle: str
     app_password: str
+
+class MisskeyAuthRequest(BaseModel):
+    # Misskey インスタンスの URL またはホスト名 (例: "misskey.io" / "https://misskey.io")
+    instance_url: str
+    # Misskey の API アクセストークン
+    access_token: str
+    # ノートのデフォルト公開範囲: public / home / followers / specified
+    visibility: str = 'home'
+    # 投稿先のチャンネル ID (省略可)
+    channel_id: str | None = None
+    # 画像アップロード先のドライブフォルダ ID (省略可)
+    drive_folder_id: str | None = None
 
 # モデルに関連しない API レスポンスの構造を表す Pydantic モデル
 ## レスポンスボディの JSON 構造と一致する
@@ -695,7 +732,7 @@ class ThirdpartyAuthURL(BaseModel):
 # ***** Twitter 連携 *****
 
 class Tweet(BaseModel):
-    source: Literal['Twitter', 'Bluesky']
+    source: Literal['Twitter', 'Bluesky', 'Misskey']
     id: str
     created_at: datetime
     user: TweetUser
@@ -712,7 +749,7 @@ class Tweet(BaseModel):
     quoted_tweet: Tweet | None
 
 class TweetUser(BaseModel):
-    source: Literal['Twitter', 'Bluesky']
+    source: Literal['Twitter', 'Bluesky', 'Misskey']
     id: str
     name: str
     screen_name: str

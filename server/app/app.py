@@ -29,6 +29,7 @@ from app.routers import (
     DataBroadcastingRouter,
     LiveStreamsRouter,
     MaintenanceRouter,
+    MisskeyRouter,
     NiconicoRouter,
     ProgramsRouter,
     RecordingPresetsRouter,
@@ -81,6 +82,7 @@ app.include_router(DataBroadcastingRouter.router)
 app.include_router(NiconicoRouter.router)
 app.include_router(TwitterRouter.router)
 app.include_router(BlueskyRouter.router)
+app.include_router(MisskeyRouter.router)
 app.include_router(UsersRouter.router)
 app.include_router(SettingsRouter.router)
 app.include_router(MaintenanceRouter.router)

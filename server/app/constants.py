@@ -403,6 +403,15 @@ BLUESKY_ACCOUNT_SESSION_FERNET_KEY = base64.urlsafe_b64encode(
 # Bluesky セッション文字列の暗号化に使う Fernet のインスタンス
 BLUESKY_ACCOUNT_SESSION_FERNET = Fernet(BLUESKY_ACCOUNT_SESSION_FERNET_KEY)
 
+# 暗号化された Misskey アクセストークンの接頭辞
+MISSKEY_ACCOUNT_TOKEN_ENCRYPTION_PREFIX = 'enc:'
+# Misskey アクセストークンの暗号化に使う Fernet の暗号化キー
+MISSKEY_ACCOUNT_TOKEN_FERNET_KEY = base64.urlsafe_b64encode(
+    hashlib.sha256(f'misskey:{JWT_SECRET_KEY}'.encode()).digest(),
+)
+# Misskey アクセストークンの暗号化に使う Fernet のインスタンス
+MISSKEY_ACCOUNT_TOKEN_FERNET = Fernet(MISSKEY_ACCOUNT_TOKEN_FERNET_KEY)
+
 # パスワードハッシュ化のための設定
 PASSWORD_CONTEXT = CryptContext(
     schemes = ['bcrypt'],
