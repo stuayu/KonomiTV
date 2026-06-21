@@ -37,6 +37,7 @@ export interface ITimeTableGenreColors {
 export interface ITwitterPanelPostTarget {
     is_post_to_twitter: boolean;
     is_post_to_bluesky: boolean;
+    is_post_to_misskey: boolean;
 }
 
 /**
@@ -46,7 +47,7 @@ export interface ITwitterPanelPostTarget {
 export interface ILocalClientSettings extends IClientSettings {
     last_synced_at: number;
     showed_panel_last_time: boolean;
-    selected_twitter_panel_account: {kind: 'Twitter' | 'Bluesky' | 'Linked'; id: number;} | null;
+    selected_twitter_panel_account: {kind: 'Twitter' | 'Bluesky' | 'Misskey' | 'Linked'; id: number;} | null;
     twitter_panel_post_targets: Record<string, ITwitterPanelPostTarget>;
     twitter_reply_thread_states: Record<string, ITwitterReplyThreadState>;
     bluesky_reply_thread_states: Record<string, IBlueskyReplyThreadState>;

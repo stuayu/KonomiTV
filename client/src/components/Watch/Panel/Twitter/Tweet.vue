@@ -156,7 +156,7 @@ const getSelectedBlueskyHandle = () => {
         return selectedAccount.bluesky_account.handle;
     }
     if (selectedAccount?.kind === 'Linked') {
-        return selectedAccount.account_link.bluesky_account.handle;
+        return selectedAccount.account_link.bluesky_account?.handle ?? null;
     }
     return null;
 };

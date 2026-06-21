@@ -77,12 +77,14 @@ import {
     isCursorConsumed,
     ITwitterGap,
     shouldFetchBlueskyForDisplayLowerBound,
+    shouldFetchMisskeyForDisplayLowerBound,
     TimelineAccountKind,
     TimelineSource,
     updateCoverageFromFetchedPage,
 } from '@/components/Watch/Panel/Twitter/TweetTimelineMergeUtils';
 import Message from '@/message';
 import Bluesky from '@/services/Bluesky';
+import Misskey from '@/services/Misskey';
 import Twitter, { ITimelineLoadMoreCursor, ITimelineTweetsResult, ITweet } from '@/services/Twitter';
 import useTwitterStore from '@/stores/TwitterStore';
 import useUserStore from '@/stores/UserStore';
@@ -162,6 +164,9 @@ const getTimelineAccountKind = (): TimelineAccountKind => {
     if (account?.kind === 'Bluesky') {
         return 'Bluesky';
     }
+    if (account?.kind === 'Misskey') {
+        return 'Misskey';
+    }
     if (account?.kind === 'Linked') {
         return 'Linked';
     }
@@ -177,8 +182,12 @@ const getTimelineAccountIdentity = (account: typeof selected_account.value) => {
     if (account?.kind === 'Bluesky') {
         return `Bluesky:${account.bluesky_account.id}`;
     }
+    if (account?.kind === 'Misskey') {
+        return `Misskey:${account.misskey_account.id}`;
+    }
     if (account?.kind === 'Linked') {
-        return `Linked:${account.account_link.twitter_account.id}:${account.account_link.bluesky_account.id}`;
+        const link = account.account_link;
+        return `Linked:${link.twitter_account?.id ?? ''}:${link.bluesky_account?.id ?? ''}:${link.misskey_account?.id ?? ''}`;
     }
     return null;
 };
@@ -419,17 +428,21 @@ const filterTimelineTweets = (tweets: ITweet[]) => {
 const addFetchedTweetsToTimeline = (
     twitterPageTweets: ITweet[],
     blueskyPageTweets: ITweet[],
+    misskeyPageTweets: ITweet[],
     existingIds: Set<string>,
 ) => {
     // 表示フィルターは投稿追加前にサービス別で適用し、取得範囲の計算にはフィルター前のページを使う
     // ここで混ぜてしまうと、非表示投稿だけのページで古い方向カーソルやクランプ下端を誤って失う
     const twitterTweets = filterTimelineTweets(twitterPageTweets);
     const blueskyTweets = filterTimelineTweets(blueskyPageTweets);
+    const misskeyTweets = filterTimelineTweets(misskeyPageTweets);
     const twitterUniqueTweets = TweetUtils.filterDuplicateTweets(twitterTweets, existingIds);
     const blueskyUniqueTweets = TweetUtils.filterDuplicateTweets(blueskyTweets, existingIds);
+    const misskeyUniqueTweets = TweetUtils.filterDuplicateTweets(misskeyTweets, existingIds);
     const uniqueTweets = TweetUtils.sortTweetsByCreatedAtInPlace([
         ...twitterUniqueTweets,
         ...blueskyUniqueTweets,
+        ...misskeyUniqueTweets,
     ]);
 
     if (uniqueTweets.length > 0) {
@@ -467,7 +480,7 @@ const applyFetchedPageState = (
 
     // 取得結果はまず取得範囲と Twitter 中央 gap に分類する
     // Bluesky の古い方向カーソルは取得範囲の境界であり、中央 gap には絶対に混ぜない
-    const coverageKey = source === 'Twitter' ? 'twitter' : 'bluesky';
+    const coverageKey = source === 'Twitter' ? 'twitter' : (source === 'Bluesky' ? 'bluesky' : 'misskey');
     const nextCoverage = updateCoverageFromFetchedPage(feedCoverage.value[coverageKey], result, pageTweets, options);
     feedCoverage.value = {
         ...feedCoverage.value,
@@ -517,8 +530,42 @@ const fetchBlueskyUntilDisplayLowerBound = async (
             break;
         }
         const blueskyPageTweets = nextResult.tweets;
-        addFetchedTweetsToTimeline([], blueskyPageTweets, existingIds);
+        addFetchedTweetsToTimeline([], blueskyPageTweets, [], existingIds);
         applyFetchedPageState('Bluesky', nextResult, blueskyPageTweets);
+    }
+};
+
+const fetchMisskeyUntilDisplayLowerBound = async (
+    misskeyAccountId: number | null,
+    shouldContinue: () => boolean = () => true,
+) => {
+    if (misskeyAccountId === null) {
+        return;
+    }
+
+    // 混合表示では Twitter の表示下端を満たす分だけ Misskey を補充する
+    for (let pageIndex = 0; pageIndex < MAX_BLUESKY_CATCHUP_PAGES; pageIndex++) {
+        if (shouldContinue() === false) {
+            break;
+        }
+        if (shouldFetchMisskeyForDisplayLowerBound(feedCoverage.value, getTimelineAccountKind()) === false) {
+            break;
+        }
+        const misskeyCursorId = feedCoverage.value.misskey.older_cursor;
+        if (misskeyCursorId === null) {
+            break;
+        }
+        const existingIds = createExistingTweetIds();
+        const nextResult = await Misskey.getHomeTimeline(misskeyAccountId, misskeyCursorId);
+        if (nextResult === null) {
+            break;
+        }
+        if (shouldContinue() === false) {
+            break;
+        }
+        const misskeyPageTweets = nextResult.tweets;
+        addFetchedTweetsToTimeline([], [], misskeyPageTweets, existingIds);
+        applyFetchedPageState('Misskey', nextResult, misskeyPageTweets);
     }
 };
 
@@ -560,11 +607,13 @@ const fetchTimelineTweets = async () => {
     const isLinkedAccount = account.kind === 'Linked';
     const requestAccountIdentity = getTimelineAccountIdentity(account);
     const twitterScreenName = account.kind === 'Twitter' ? account.twitter_account.screen_name :
-        account.kind === 'Linked' ? account.account_link.twitter_account.screen_name : null;
+        account.kind === 'Linked' ? (account.account_link.twitter_account?.screen_name ?? null) : null;
     const blueskyHandle = account.kind === 'Bluesky' ? account.bluesky_account.handle :
-        account.kind === 'Linked' ? account.account_link.bluesky_account.handle : null;
-    // 紐付けアカウントでも最初の 1 ページは並列取得し、Twitter の結果が取れた後だけ Bluesky の追加取得を検討する
-    const [twitter_settled_result, bluesky_first_settled_result] = await Promise.allSettled([
+        account.kind === 'Linked' ? (account.account_link.bluesky_account?.handle ?? null) : null;
+    const misskeyAccountId = account.kind === 'Misskey' ? account.misskey_account.id :
+        account.kind === 'Linked' ? (account.account_link.misskey_account?.id ?? null) : null;
+    // 紐付けアカウントでも最初の 1 ページは並列取得し、Twitter の結果が取れた後だけ各サービスの追加取得を検討する
+    const [twitter_settled_result, bluesky_first_settled_result, misskey_first_settled_result] = await Promise.allSettled([
         // Twitter は Web App の HomeLatestTimeline と同じく、更新履歴の新着方向カーソルと `seenTweetIds` を渡す
         // 時間を空けた更新では Twitter 側が最新数十件だけを返すため、後段で gap ボタンを残して中間を埋められるようにする
         twitterScreenName !== null ?
@@ -574,6 +623,9 @@ const fetchTimelineTweets = async () => {
             // Bluesky のカーソルは「次の古いページ」専用なので、通常更新では必ず最新ページを取り直す
             // 古いカーソルを更新に使うと、時間を置いた後に最新投稿へ戻れず Twitter 側との時系列マージが壊れる
             Bluesky.getHomeTimeline(blueskyHandle) :
+            Promise.resolve(null),
+        misskeyAccountId !== null ?
+            Misskey.getHomeTimeline(misskeyAccountId) :
             Promise.resolve(null),
     ]);
     const twitter_result = getTimelineFetchResult(twitter_settled_result);
@@ -598,6 +650,7 @@ const fetchTimelineTweets = async () => {
     const targetOldestTweet = getOldestTweet(twitterPageTweets);
     const targetOldestCreatedAt = targetOldestTweet !== null ? String(targetOldestTweet.created_at) : null;
     let bluesky_result = getTimelineFetchResult(bluesky_first_settled_result);
+    let misskey_result = getTimelineFetchResult(misskey_first_settled_result);
     if (isLinkedAccount === true && blueskyHandle !== null && bluesky_result !== null) {
         // 初回ページの結果を使った上で、Twitter の取得範囲に届いていない場合だけ追加ページを取得する
         // Promise.allSettled の結果を直接再利用できないため、同じ条件を満たすまで明示的に追加取得する
@@ -628,6 +681,35 @@ const fetchTimelineTweets = async () => {
             load_more_cursors: loadMoreCursors,
         };
     }
+    if (isLinkedAccount === true && misskeyAccountId !== null && misskey_result !== null) {
+        // Misskey でも Bluesky と同じ方針で、Twitter の取得範囲に届くまで古いページを追加取得する
+        const collectedTweets = [...misskey_result.tweets];
+        let loadMoreCursorId = misskey_result.load_more_cursors[0]?.cursor_id;
+        let loadMoreCursors = misskey_result.load_more_cursors;
+        if (targetOldestCreatedAt !== null) {
+            const targetOldestTime = dayjs(targetOldestCreatedAt).valueOf();
+            for (let pageIndex = 0; pageIndex < MAX_BLUESKY_CATCHUP_PAGES; pageIndex++) {
+                const oldestTweet = getOldestTweet(collectedTweets);
+                const hasReachedTarget = oldestTweet !== null && dayjs(oldestTweet.created_at).valueOf() < targetOldestTime;
+                const hasOverlap = collectedTweets.some(tweet => existingIds.has(TweetUtils.getTweetIdentityKey(tweet)));
+                if (hasReachedTarget === true || hasOverlap === true || !loadMoreCursorId) {
+                    break;
+                }
+                const nextResult = await Misskey.getHomeTimeline(misskeyAccountId, loadMoreCursorId);
+                if (!nextResult) {
+                    break;
+                }
+                collectedTweets.push(...nextResult.tweets);
+                loadMoreCursorId = nextResult.load_more_cursors[0]?.cursor_id;
+                loadMoreCursors = nextResult.load_more_cursors;
+            }
+        }
+        misskey_result = {
+            ...misskey_result,
+            tweets: collectedTweets,
+            load_more_cursors: loadMoreCursors,
+        };
+    }
 
     // Bluesky の補完中にもアカウントが切り替わる可能性がある
     // ここで再確認し、古い混合結果が新しいアカウントの `tweetsByKey` へ入るのを防ぐ
@@ -639,9 +721,10 @@ const fetchTimelineTweets = async () => {
     }
 
     const isSameRequestAccount = () => getTimelineAccountIdentity(selected_account.value) === requestAccountIdentity;
-    const result = twitter_result ?? bluesky_result;
+    const result = twitter_result ?? bluesky_result ?? misskey_result;
     if (result && result.tweets) {
         const blueskyPageTweets = bluesky_result?.tweets ?? [];
+        const misskeyPageTweets = misskey_result?.tweets ?? [];
 
         // Twitter の新着方向カーソルは表示対象の有無に関係なく、実レスポンスが進んだときだけ更新する
         // 30 秒制限の空応答では既存カーソルを維持し、次回も同じ位置から更新できるようにする
@@ -649,15 +732,21 @@ const fetchTimelineTweets = async () => {
             twitterNewerCursorId.value = twitter_result.newer_cursor_id;
         }
 
-        addFetchedTweetsToTimeline(twitterPageTweets, blueskyPageTweets, existingIds);
+        addFetchedTweetsToTimeline(twitterPageTweets, blueskyPageTweets, misskeyPageTweets, existingIds);
         // 通常更新は新着方向カーソルの取得であり、古い方向の終端確認ではない
         // 末尾状態が確立するまでは `Older` を採用し、確立後の通常更新では巻き戻りを防ぐ
         applyFetchedPageState('Twitter', twitter_result, twitterPageTweets, {
             should_preserve_older_state: feedCoverage.value.twitter.older_cursor !== null || feedCoverage.value.twitter.is_older_exhausted === true,
             should_keep_older_uninitialized_when_missing: true,
         });
-        applyFetchedPageState('Bluesky', bluesky_result, blueskyPageTweets);
+        if (blueskyHandle !== null) {
+            applyFetchedPageState('Bluesky', bluesky_result, blueskyPageTweets);
+        }
+        if (misskeyAccountId !== null) {
+            applyFetchedPageState('Misskey', misskey_result, misskeyPageTweets);
+        }
         await fetchBlueskyUntilDisplayLowerBound(blueskyHandle, isSameRequestAccount);
+        await fetchMisskeyUntilDisplayLowerBound(misskeyAccountId, isSameRequestAccount);
 
         // 仮想スクローラーの描画をリフレッシュ
         refreshScroller();
@@ -683,13 +772,22 @@ const handleLoadMore = async (item: ILoadMoreItem) => {
     const account = selected_account.value;
     const requestAccountIdentity = getTimelineAccountIdentity(account);
     const twitterScreenName = account.kind === 'Twitter' ? account.twitter_account.screen_name :
-        account.kind === 'Linked' ? account.account_link.twitter_account.screen_name : null;
+        account.kind === 'Linked' ? (account.account_link.twitter_account?.screen_name ?? null) : null;
     const blueskyHandle = account.kind === 'Bluesky' ? account.bluesky_account.handle :
-        account.kind === 'Linked' ? account.account_link.bluesky_account.handle : null;
+        account.kind === 'Linked' ? (account.account_link.bluesky_account?.handle ?? null) : null;
+    const misskeyAccountId = account.kind === 'Misskey' ? account.misskey_account.id :
+        account.kind === 'Linked' ? (account.account_link.misskey_account?.id ?? null) : null;
     const loadMoreTargets = decideLoadMoreTargets(item, feedCoverage.value, getTimelineAccountKind());
     const shouldFetchTwitter = loadMoreTargets.should_fetch_twitter === true && twitterScreenName !== null && loadMoreTargets.twitter_cursor_id !== null;
     const shouldFetchBluesky = loadMoreTargets.should_fetch_bluesky === true && blueskyHandle !== null && loadMoreTargets.bluesky_cursor_id !== null;
-    if (shouldFetchTwitter === false && shouldFetchBluesky === false) {
+    const shouldFetchMisskey = (
+        item.type === 'tail' &&
+        misskeyAccountId !== null &&
+        feedCoverage.value.twitter.is_older_exhausted === true &&
+        feedCoverage.value.misskey.older_cursor !== null
+    ) || (account.kind === 'Misskey' && item.type === 'tail' && feedCoverage.value.misskey.older_cursor !== null);
+
+    if (shouldFetchTwitter === false && shouldFetchBluesky === false && shouldFetchMisskey === false) {
         isFetching.value = false;
         return;
     }
@@ -698,7 +796,7 @@ const handleLoadMore = async (item: ILoadMoreItem) => {
     // Twitter を実際に取得する場合だけ seenTweetIds キューを消費する
     // Bluesky の補充や Bluesky 単独の末尾取得で Twitter 側の閲覧済み情報が消えないようにする
     const seenTweetIds = shouldFetchTwitter === true ? dequeuePendingSeenTweetIds() : [];
-    const [twitter_settled_result, bluesky_settled_result] = await Promise.allSettled([
+    const [twitter_settled_result, bluesky_settled_result, misskey_settled_result] = await Promise.allSettled([
         shouldFetchTwitter === true ?
             Twitter.getHomeTimeline(
                 twitterScreenName,
@@ -710,9 +808,13 @@ const handleLoadMore = async (item: ILoadMoreItem) => {
         shouldFetchBluesky === true ?
             Bluesky.getHomeTimeline(blueskyHandle, loadMoreTargets.bluesky_cursor_id!) :
             Promise.resolve(null),
+        shouldFetchMisskey === true ?
+            Misskey.getHomeTimeline(misskeyAccountId!, feedCoverage.value.misskey.older_cursor!) :
+            Promise.resolve(null),
     ]);
     const twitter_result = getTimelineFetchResult(twitter_settled_result);
     const bluesky_result = getTimelineFetchResult(bluesky_settled_result);
+    const misskey_result = getTimelineFetchResult(misskey_settled_result);
 
     // 続き取得中にアカウントが切り替わった場合、旧アカウントのページを現在の表示へ差し込まない
     // Twitter 取得が空応答や失敗だった場合は、消費した seenTweetIds だけ元アカウントへ戻す
@@ -732,7 +834,8 @@ const handleLoadMore = async (item: ILoadMoreItem) => {
 
     const twitterPageTweets = isCursorConsumed(twitter_result) === true ? [...(twitter_result?.tweets ?? [])] : [];
     const blueskyPageTweets = bluesky_result?.tweets ?? [];
-    addFetchedTweetsToTimeline(twitterPageTweets, blueskyPageTweets, existingIds);
+    const misskeyPageTweets = misskey_result?.tweets ?? [];
+    addFetchedTweetsToTimeline(twitterPageTweets, blueskyPageTweets, misskeyPageTweets, existingIds);
 
     // 中央 gap は Twitter のレスポンスが実際に進んだ場合だけ消費する
     // 30 秒制限や通信失敗で取り除くと、同じ未取得範囲を二度と埋められなくなる
@@ -742,11 +845,20 @@ const handleLoadMore = async (item: ILoadMoreItem) => {
     applyFetchedPageState('Twitter', twitter_result, twitterPageTweets, {
         should_preserve_older_state: item.type === 'twitter_gap',
     });
-    applyFetchedPageState('Bluesky', bluesky_result, blueskyPageTweets);
+    if (blueskyHandle !== null) {
+        applyFetchedPageState('Bluesky', bluesky_result, blueskyPageTweets);
+    }
+    if (misskeyAccountId !== null) {
+        applyFetchedPageState('Misskey', misskey_result, misskeyPageTweets);
+    }
     // 中央 gap は Twitter だけを埋める操作なので、Bluesky 補充は末尾取得の後だけ行う
     if (item.type === 'tail') {
         await fetchBlueskyUntilDisplayLowerBound(
             blueskyHandle,
+            () => getTimelineAccountIdentity(selected_account.value) === requestAccountIdentity,
+        );
+        await fetchMisskeyUntilDisplayLowerBound(
+            misskeyAccountId,
             () => getTimelineAccountIdentity(selected_account.value) === requestAccountIdentity,
         );
     }
@@ -773,8 +885,8 @@ watch(selected_account, (newAccount, oldAccount) => {
     twitterNewerCursorId.value = null;  // 新着方向カーソルをリセット
     clearVisibleTweetTimers();
     // 離脱元アカウントの表示中判定を破棄し、移動先アカウントにも前回表示時の判定が残っていない状態で再取得する
-    clearConfirmedVisibleTweetIds(oldAccount?.kind === 'Twitter' ? oldAccount.twitter_account.screen_name : oldAccount?.kind === 'Linked' ? oldAccount.account_link.twitter_account.screen_name : undefined);
-    clearConfirmedVisibleTweetIds(newAccount?.kind === 'Twitter' ? newAccount.twitter_account.screen_name : newAccount?.kind === 'Linked' ? newAccount.account_link.twitter_account.screen_name : undefined);
+    clearConfirmedVisibleTweetIds(oldAccount?.kind === 'Twitter' ? oldAccount.twitter_account.screen_name : oldAccount?.kind === 'Linked' ? (oldAccount.account_link.twitter_account?.screen_name ?? undefined) : undefined);
+    clearConfirmedVisibleTweetIds(newAccount?.kind === 'Twitter' ? newAccount.twitter_account.screen_name : newAccount?.kind === 'Linked' ? (newAccount.account_link.twitter_account?.screen_name ?? undefined) : undefined);
     isInitialFetchPending.value = true;
     isFirstFetchCompleted = false;
     tryAutoFetchTimeline();

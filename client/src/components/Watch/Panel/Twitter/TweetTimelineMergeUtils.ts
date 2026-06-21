@@ -1,8 +1,8 @@
 import { ITimelineLoadMoreCursor, ITimelineTweetsResult, ITweet } from '@/services/Twitter';
 import { TweetUtils, dayjs } from '@/utils';
 
-export type TimelineAccountKind = 'Twitter' | 'Bluesky' | 'Linked';
-export type TimelineSource = 'Twitter' | 'Bluesky';
+export type TimelineAccountKind = 'Twitter' | 'Bluesky' | 'Misskey' | 'Linked';
+export type TimelineSource = 'Twitter' | 'Bluesky' | 'Misskey';
 
 /**
  * サービス単位の取得済み範囲と古い方向カーソルを保持する
@@ -23,6 +23,9 @@ export interface IFeedCoverage {
 export interface IMergedFeedCoverage {
     twitter: IFeedCoverage;
     bluesky: IFeedCoverage;
+    // Misskey は Bluesky と同様に「Twitter 以外の時系列ソース」として扱う
+    // 既存ロジックへの影響を最小化するため、段階的移行中は独立した coverage を保持する
+    misskey: IFeedCoverage;
 }
 
 /**
@@ -99,6 +102,7 @@ export const createEmptyFeedCoverage = (): IFeedCoverage => ({
 export const createEmptyMergedFeedCoverage = (): IMergedFeedCoverage => ({
     twitter: createEmptyFeedCoverage(),
     bluesky: createEmptyFeedCoverage(),
+    misskey: createEmptyFeedCoverage(),
 });
 
 const getCreatedAtMilliseconds = (createdAt: Date | string) => {
@@ -158,7 +162,7 @@ export const classifyTimelineCursors = (
     }
 
     const olderCursor = getOlderCursor(result.load_more_cursors);
-    if (source === 'Bluesky') {
+    if (source === 'Bluesky' || source === 'Misskey') {
         return {
             older_cursor: olderCursor?.cursor_id ?? null,
             twitter_gaps: [],
@@ -302,6 +306,9 @@ const hasTailCursor = (
     if (accountKind === 'Bluesky') {
         return coverage.bluesky.is_older_exhausted === false && coverage.bluesky.older_cursor !== null;
     }
+    if (accountKind === 'Misskey') {
+        return coverage.misskey.is_older_exhausted === false && coverage.misskey.older_cursor !== null;
+    }
     if (coverage.twitter.is_older_exhausted === false) {
         return coverage.twitter.older_cursor !== null;
     }
@@ -426,6 +433,17 @@ export const decideLoadMoreTargets = (
         };
     }
 
+    if (accountKind === 'Misskey') {
+        return {
+            should_fetch_twitter: false,
+            should_fetch_bluesky: coverage.misskey.older_cursor !== null,
+            twitter_cursor_id: null,
+            twitter_cursor_type: null,
+            bluesky_cursor_id: coverage.misskey.older_cursor,
+            consumed_twitter_gap_id: null,
+        };
+    }
+
     if (coverage.twitter.is_older_exhausted === false) {
         return {
             should_fetch_twitter: coverage.twitter.older_cursor !== null,
@@ -465,6 +483,26 @@ export const shouldFetchBlueskyForDisplayLowerBound = (
         return true;
     }
     return getCreatedAtMilliseconds(coverage.bluesky.oldest_created_at) > getCreatedAtMilliseconds(displayLowerBound);
+};
+
+/**
+ * 混合表示の下端へ Misskey の保持範囲が届いているかを判定する
+ * @param coverage Twitter / Bluesky / Misskey の統合取得範囲
+ * @param accountKind 表示中アカウント種別
+ * @returns Misskey の追加取得が必要な場合は true
+ */
+export const shouldFetchMisskeyForDisplayLowerBound = (
+    coverage: IMergedFeedCoverage,
+    accountKind: TimelineAccountKind,
+) => {
+    const displayLowerBound = resolveDisplayLowerBound(coverage, accountKind);
+    if (displayLowerBound === null || coverage.misskey.older_cursor === null || coverage.misskey.is_older_exhausted === true) {
+        return false;
+    }
+    if (coverage.misskey.oldest_created_at === null) {
+        return true;
+    }
+    return getCreatedAtMilliseconds(coverage.misskey.oldest_created_at) > getCreatedAtMilliseconds(displayLowerBound);
 };
 
 /**

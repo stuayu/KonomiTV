@@ -294,9 +294,9 @@ const getAvailableSearchProviders = (account: typeof selected_account.value) => 
 const getSearchAccountIdentity = (account: typeof selected_account.value) => {
     return {
         twitterAccountId: account?.kind === 'Twitter' ? account.twitter_account.id :
-            account?.kind === 'Linked' ? account.account_link.twitter_account.id : null,
+            account?.kind === 'Linked' ? (account.account_link.twitter_account?.id ?? null) : null,
         blueskyAccountId: account?.kind === 'Bluesky' ? account.bluesky_account.id :
-            account?.kind === 'Linked' ? account.account_link.bluesky_account.id : null,
+            account?.kind === 'Linked' ? (account.account_link.bluesky_account?.id ?? null) : null,
     };
 };
 
@@ -356,12 +356,12 @@ const performSearchTweets = async () => {
     const existingIds = createExistingTweetIds();
     // 紐付けアカウントでは Twitter と Bluesky の検索を並列実行し、片方だけ連携している場合は不要な API を呼ばない
     const [twitter_settled_result, bluesky_settled_result] = await Promise.allSettled([
-        account.kind === 'Twitter' || account.kind === 'Linked' ?
-            Twitter.searchTweets(account.kind === 'Twitter' ? account.twitter_account.screen_name : account.account_link.twitter_account.screen_name, query, cursor_id, 'Top') :
+        account.kind === 'Twitter' || (account.kind === 'Linked' && account.account_link.twitter_account !== null) ?
+            Twitter.searchTweets(account.kind === 'Twitter' ? account.twitter_account.screen_name : (account.account_link.twitter_account?.screen_name ?? ''), query, cursor_id, 'Top') :
             Promise.resolve(null),
-        account.kind === 'Bluesky' || account.kind === 'Linked' ?
+        account.kind === 'Bluesky' || (account.kind === 'Linked' && account.account_link.bluesky_account !== null) ?
             // Bluesky の検索カーソルは古い方向の続きなので、検索更新では常にカーソルなしで最新検索結果を取り直す
-            Bluesky.searchPosts(account.kind === 'Bluesky' ? account.bluesky_account.handle : account.account_link.bluesky_account.handle, requestSearchQuery) :
+            Bluesky.searchPosts(account.kind === 'Bluesky' ? account.bluesky_account.handle : (account.account_link.bluesky_account?.handle ?? ''), requestSearchQuery) :
             Promise.resolve(null),
     ]);
 
@@ -405,7 +405,7 @@ const performSearchTweets = async () => {
         applyFetchedPageState('Bluesky', bluesky_result, blueskyPageTweets);
         await fetchBlueskyUntilDisplayLowerBound(
             account.kind === 'Bluesky' ? account.bluesky_account.handle :
-                account.kind === 'Linked' ? account.account_link.bluesky_account.handle : null,
+                account.kind === 'Linked' ? (account.account_link.bluesky_account?.handle ?? null) : null,
             isSameSearchRequest,
         );
 
@@ -444,9 +444,9 @@ const handleLoadMore = async (item: ILoadMoreItem) => {
     const account = selected_account.value;
     const requestAccountIdentity = getSearchAccountIdentity(account);
     const twitterScreenName = account.kind === 'Twitter' ? account.twitter_account.screen_name :
-        account.kind === 'Linked' ? account.account_link.twitter_account.screen_name : null;
+        account.kind === 'Linked' ? (account.account_link.twitter_account?.screen_name ?? null) : null;
     const blueskyHandle = account.kind === 'Bluesky' ? account.bluesky_account.handle :
-        account.kind === 'Linked' ? account.account_link.bluesky_account.handle : null;
+        account.kind === 'Linked' ? (account.account_link.bluesky_account?.handle ?? null) : null;
     const loadMoreTargets = decideLoadMoreTargets(item, feedCoverage.value, getSearchAccountKind());
     const shouldFetchTwitter = loadMoreTargets.should_fetch_twitter === true && twitterScreenName !== null && loadMoreTargets.twitter_cursor_id !== null;
     const shouldFetchBluesky = loadMoreTargets.should_fetch_bluesky === true && blueskyHandle !== null && loadMoreTargets.bluesky_cursor_id !== null;

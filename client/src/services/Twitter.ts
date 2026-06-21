@@ -31,7 +31,7 @@ export interface IBrowserEnvironmentUserAgentData {
 
 /** ツイートを表すインターフェイス */
 export interface ITweet {
-    source: 'Twitter' | 'Bluesky';
+    source: 'Twitter' | 'Bluesky' | 'Misskey';
     id: string;
     created_at: Date;
     user: ITweetUser;
@@ -50,7 +50,7 @@ export interface ITweet {
 
 /** ツイートのユーザーを表すインターフェイス */
 export interface ITweetUser {
-    source: 'Twitter' | 'Bluesky';
+    source: 'Twitter' | 'Bluesky' | 'Misskey';
     id: string;
     name: string;
     screen_name: string;
