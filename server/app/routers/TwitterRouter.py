@@ -1,11 +1,5 @@
 
-import asyncio
-import datetime
-import io
-import json
-import random
-from collections.abc import Coroutine
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -379,33 +373,6 @@ async def TwitterTweetAPI(
             status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail = 'Can tweet up to 4 images',
         )
-
-    # アップロードした画像の media_id のリスト
-    media_ids: list[str] = []
-
-    misskey = MisskeyPost()
-
-    # 画像をアップロードするタスク
-    upload_tasks_mk: list[str] = []
-    dt_now = datetime.datetime.now()
-
-    for image in images:
-        # `image.file` の内容をメモリに読み取る
-        image.file.seek(0)
-        file_content = image.file.read()
-        
-        # メモリ内のファイルオブジェクトを作成
-        image_file_copy_misskey = io.BytesIO(file_content)
-        
-        # `io.BytesIO` オブジェクトは、ファイルの位置をリセットする必要があります
-        image_file_copy_misskey.seek(0)
-        
-        upload_tasks_mk.append(await misskey.uploadPictures(file=image_file_copy_misskey, filename=dt_now.strftime("%Y年%m月%d日 %H:%M:%S")))
-
-    await asyncio.sleep(0)
-
-    # misskeyに投稿
-    await misskey.sendAttachedMessage(tweet, upload_tasks_mk)
 
     # Twitter Web App 経由でツイートを送信し、結果をそのまま返す
     return await TwitterGraphQLAPI(twitter_account).createTweet(tweet, images, in_reply_to_status_id)
