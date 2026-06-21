@@ -33,6 +33,7 @@ from app.constants import (
 )
 from app.models.AccountLink import AccountLink
 from app.models.BlueskyAccount import BlueskyAccount
+from app.models.MisskeyAccount import MisskeyAccount
 from app.models.TwitterAccount import TwitterAccount
 from app.models.User import User
 
@@ -163,8 +164,10 @@ async def GetSpecifiedUser(
     user = await User.filter(name=username).prefetch_related(
         'twitter_accounts',
         'bluesky_accounts',
+        'misskey_accounts',
         'account_links__twitter_account',
         'account_links__bluesky_account',
+        'account_links__misskey_account',
     ).get_or_none()
 
     # 指定されたユーザー名のユーザーが存在しない
@@ -259,8 +262,10 @@ async def UserCreateAPI(
     await current_user.fetch_related(
         'twitter_accounts',
         'bluesky_accounts',
+        'misskey_accounts',
         'account_links__twitter_account',
         'account_links__bluesky_account',
+        'account_links__misskey_account',
     )
     return current_user
 
@@ -328,8 +333,10 @@ async def UsersAPI(
     return await User.all().prefetch_related(
         'twitter_accounts',
         'bluesky_accounts',
+        'misskey_accounts',
         'account_links__twitter_account',
         'account_links__bluesky_account',
+        'account_links__misskey_account',
     )
 
 
@@ -359,68 +366,105 @@ async def UserAPI(
     return await User.filter(id=current_user.id).prefetch_related(
         'twitter_accounts',
         'bluesky_accounts',
+        'misskey_accounts',
         'account_links__twitter_account',
         'account_links__bluesky_account',
+        'account_links__misskey_account',
     ).get()
 
 
 @router.post(
     '/me/account-links',
-    summary = 'Twitter / Bluesky アカウント紐付け作成 API',
+    summary = 'SNS アカウント紐付け作成 API',
     response_description = '作成したアカウント紐付け。',
     response_model = schemas.AccountLink,
     status_code = status.HTTP_201_CREATED,
 )
 async def AccountLinkCreateAPI(
-    account_link_create_request: Annotated[schemas.AccountLinkCreateRequest, Body(description='紐付ける Twitter / Bluesky アカウント ID 。')],
+    account_link_create_request: Annotated[schemas.AccountLinkCreateRequest, Body(description='紐付ける SNS アカウント ID 。Twitter / Bluesky / Misskey のうち 2 つ以上が必要。')],
     current_user: Annotated[User, Depends(GetCurrentUser)],
 ):
     """
-    ログイン中ユーザーの Twitter アカウントと Bluesky アカウントを紐付ける。<br>
-    紐付けは視聴画面の Twitter タブで両方のタイムラインをまとめて表示し、ツイートを同時投稿する際に利用される。
+    ログイン中ユーザーの SNS アカウント間を紐付ける。<br>
+    Twitter / Bluesky / Misskey のうち任意の 2 サービスを同時投稿・タイムライン統合の対象にできる。
     """
 
-    # リクエストされた Twitter アカウントがログイン中ユーザーの所有物であることを確認する
-    twitter_account = await TwitterAccount.filter(
-        id = account_link_create_request.twitter_account_id,
-        user_id = current_user.id,
-    ).get_or_none()
-    if twitter_account is None:
+    # 少なくとも 2 サービスのアカウント ID が指定されているか確認する
+    specified_count = sum([
+        account_link_create_request.twitter_account_id is not None,
+        account_link_create_request.bluesky_account_id is not None,
+        account_link_create_request.misskey_account_id is not None,
+    ])
+    if specified_count < 2:
         raise HTTPException(
             status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail = 'Specified Twitter account does not exist',
+            detail = 'At least two account IDs (twitter_account_id, bluesky_account_id, misskey_account_id) must be specified',
         )
 
-    # Bluesky 側も同じユーザーに属するレコードだけを許可し、他ユーザーのアカウントとの紐付けを防ぐ
-    bluesky_account = await BlueskyAccount.filter(
-        id = account_link_create_request.bluesky_account_id,
-        user_id = current_user.id,
-    ).get_or_none()
-    if bluesky_account is None:
-        raise HTTPException(
-            status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail = 'Specified Bluesky account does not exist',
-        )
+    # Twitter アカウントが指定された場合はログイン中ユーザーの所有物であることを確認する
+    twitter_account: TwitterAccount | None = None
+    if account_link_create_request.twitter_account_id is not None:
+        twitter_account = await TwitterAccount.filter(
+            id = account_link_create_request.twitter_account_id,
+            user_id = current_user.id,
+        ).get_or_none()
+        if twitter_account is None:
+            raise HTTPException(
+                status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail = 'Specified Twitter account does not exist',
+            )
 
-    # 返却直後にクライアントが表示名やアイコンを表示できるように、両方の子レコードを取得しておく
+    # Bluesky アカウントが指定された場合はログイン中ユーザーの所有物であることを確認する
+    bluesky_account: BlueskyAccount | None = None
+    if account_link_create_request.bluesky_account_id is not None:
+        bluesky_account = await BlueskyAccount.filter(
+            id = account_link_create_request.bluesky_account_id,
+            user_id = current_user.id,
+        ).get_or_none()
+        if bluesky_account is None:
+            raise HTTPException(
+                status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail = 'Specified Bluesky account does not exist',
+            )
+
+    # Misskey アカウントが指定された場合はログイン中ユーザーの所有物であることを確認する
+    misskey_account: MisskeyAccount | None = None
+    if account_link_create_request.misskey_account_id is not None:
+        misskey_account = await MisskeyAccount.filter(
+            id = account_link_create_request.misskey_account_id,
+            user_id = current_user.id,
+        ).get_or_none()
+        if misskey_account is None:
+            raise HTTPException(
+                status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail = 'Specified Misskey account does not exist',
+            )
+
+    # 返却直後にクライアントが表示名やアイコンを表示できるように、子レコードを取得しておく
     try:
         account_link = await AccountLink.create(
             user = current_user,
             twitter_account = twitter_account,
             bluesky_account = bluesky_account,
+            misskey_account = misskey_account,
         )
     except IntegrityError as ex:
         # 紐付けは DB の一意制約で一対一を最終保証する
         ## 事前確認だけでは複数タブの同時作成を防げないため、競合後に実際の重複側を調べて既存のエラー文へ戻す
-        if await AccountLink.filter(twitter_account_id=twitter_account.id).exists() is True:
+        if twitter_account is not None and await AccountLink.filter(twitter_account_id=twitter_account.id).exists() is True:
             raise HTTPException(
                 status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail = 'Specified Twitter account is already linked',
             ) from ex
-        if await AccountLink.filter(bluesky_account_id=bluesky_account.id).exists() is True:
+        if bluesky_account is not None and await AccountLink.filter(bluesky_account_id=bluesky_account.id).exists() is True:
             raise HTTPException(
                 status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail = 'Specified Bluesky account is already linked',
+            ) from ex
+        if misskey_account is not None and await AccountLink.filter(misskey_account_id=misskey_account.id).exists() is True:
+            raise HTTPException(
+                status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail = 'Specified Misskey account is already linked',
             ) from ex
         logging.error(
             f'[UsersRouter][AccountLinkCreateAPI] Failed to create account link due to an unexpected integrity error. [user_id: {current_user.id}]',
@@ -430,7 +474,7 @@ async def AccountLinkCreateAPI(
             status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail = 'Failed to create account link',
         ) from ex
-    await account_link.fetch_related('twitter_account', 'bluesky_account')
+    await account_link.fetch_related('twitter_account', 'bluesky_account', 'misskey_account')
     return account_link
 
 

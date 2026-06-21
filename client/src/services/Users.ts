@@ -13,6 +13,7 @@ export interface IUser {
     niconico_user_premium: boolean | null;
     twitter_accounts: ITwitterAccount[];
     bluesky_accounts: IBlueskyAccount[];
+    misskey_accounts: IMisskeyAccount[];
     account_links: IAccountLink[];
     created_at: string;
     updated_at: string;
@@ -39,11 +40,27 @@ export interface IBlueskyAccount {
     updated_at: string;
 }
 
-/** Twitter アカウントと Bluesky アカウントの紐付け情報を表すインターフェイス */
+/** ユーザーアカウントに紐づく Misskey アカウントの情報を表すインターフェイス */
+export interface IMisskeyAccount {
+    id: number;
+    instance_url: string;
+    misskey_user_id: string;
+    username: string;
+    name: string;
+    icon_url: string;
+    visibility: string;
+    channel_id: string | null;
+    drive_folder_id: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+/** SNS アカウント間の紐付け情報を表すインターフェイス (Twitter / Bluesky / Misskey のうち 2 つ以上が非 null) */
 export interface IAccountLink {
     id: number;
-    twitter_account: ITwitterAccount;
-    bluesky_account: IBlueskyAccount;
+    twitter_account: ITwitterAccount | null;
+    bluesky_account: IBlueskyAccount | null;
+    misskey_account: IMisskeyAccount | null;
     created_at: string;
     updated_at: string;
 }
@@ -52,6 +69,7 @@ export interface IAccountLink {
 export type ISelectableAccount =
     | { kind: 'Twitter'; twitter_account: ITwitterAccount; }
     | { kind: 'Bluesky'; bluesky_account: IBlueskyAccount; }
+    | { kind: 'Misskey'; misskey_account: IMisskeyAccount; }
     | { kind: 'Linked'; account_link: IAccountLink; };
 
 /** ユーザーアカウントのアクセストークンを表すインターフェイス */

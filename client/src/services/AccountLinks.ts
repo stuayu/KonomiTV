@@ -3,10 +3,14 @@ import APIClient from '@/services/APIClient';
 import { IAccountLink } from '@/services/Users';
 
 
-/** Twitter アカウントと Bluesky アカウントの紐付け作成リクエスト */
+/**
+ * SNS アカウント紐付け作成リクエスト
+ * twitter_account_id / bluesky_account_id / misskey_account_id のうち 2 つ以上を指定すること
+ */
 export interface IAccountLinkCreateRequest {
-    twitter_account_id: number;
-    bluesky_account_id: number;
+    twitter_account_id?: number | null;
+    bluesky_account_id?: number | null;
+    misskey_account_id?: number | null;
 }
 
 class AccountLinks {

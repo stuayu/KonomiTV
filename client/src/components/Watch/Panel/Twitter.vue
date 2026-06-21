@@ -60,11 +60,13 @@
                 <button v-if="twitterStore.selected_account?.kind === 'Linked'" v-ripple
                     class="post-target-button" @click="cycleLinkedPostTarget()">
                     <span v-if="isLinkedPostTargetBoth" class="dual-service-icon dual-service-icon--post-target">
-                        <Icon icon="fa-brands:twitter" />
-                        <Icon icon="simple-icons:bluesky" />
+                        <Icon v-if="shouldPostToTwitter" icon="fa-brands:twitter" />
+                        <Icon v-if="shouldPostToBluesky" icon="simple-icons:bluesky" />
+                        <Icon v-if="shouldPostToMisskey" icon="simple-icons:misskey" />
                     </span>
                     <Icon v-else-if="shouldPostToTwitter" icon="fa-brands:twitter" width="14px" />
                     <Icon v-else-if="shouldPostToBluesky" icon="simple-icons:bluesky" width="14px" />
+                    <Icon v-else-if="shouldPostToMisskey" icon="simple-icons:misskey" width="14px" />
                 </button>
                 <div class="limit-meter">
                     <div class="limit-meter__content" :class="{
@@ -82,11 +84,13 @@
                 <button class="tweet-button" :class="tweetButtonClass" v-ripple="Utils.isTouchDevice() === false" :disabled="is_tweet_button_disabled"
                     @click="sendTweet()" @touchstart="sendTweet()">
                     <span v-if="shouldPostToBothServices" class="dual-service-icon dual-service-icon--tweet-button">
-                        <Icon icon="fa-brands:twitter" />
-                        <Icon icon="simple-icons:bluesky" />
+                        <Icon v-if="shouldPostToTwitter" icon="fa-brands:twitter" />
+                        <Icon v-if="shouldPostToBluesky" icon="simple-icons:bluesky" />
+                        <Icon v-if="shouldPostToMisskey" icon="simple-icons:misskey" />
                     </span>
                     <Icon v-else-if="shouldPostToTwitter" icon="fa-brands:twitter" height="16px" />
                     <Icon v-else-if="shouldPostToBluesky" icon="simple-icons:bluesky" height="15px" />
+                    <Icon v-else-if="shouldPostToMisskey" icon="simple-icons:misskey" height="15px" />
                     <span class="ml-1">{{tweetButtonLabel}}</span>
                 </button>
             </div>
@@ -146,23 +150,24 @@
         <div class="twitter-account-list" :class="{'twitter-account-list--display': is_twitter_account_list_display}">
             <div v-ripple class="twitter-account" v-for="account in twitterStore.selectable_accounts"
                 :key="getSelectableAccountKey(account)" @click="updateSelectedAccount(account)">
-                <!-- 単体アカウントは左下のサービスバッジ、紐付けアカウントは設定画面同様に Bluesky アバターを重ねる -->
+                <!-- 単体アカウントは左下のサービスバッジ、紐付けアカウントは 2 番目のアバターを重ねる -->
                 <div class="twitter-account__icon-wrapper">
                     <img class="twitter-account__icon" :src="getSelectableAccountIconUrl(account)">
                     <img v-if="account.kind === 'Linked'" class="twitter-account__icon-badge"
-                        :src="account.account_link.bluesky_account.icon_url || '/assets/images/account-icon-default.png'">
+                        :src="getLinkedAccountSecondaryIconUrl(account.account_link) || '/assets/images/account-icon-default.png'">
                     <span v-if="account.kind === 'Twitter'" class="twitter-account__service-badge twitter-account__service-badge--twitter">
                         <Icon icon="fa-brands:twitter" />
                     </span>
                     <span v-if="account.kind === 'Bluesky'" class="twitter-account__service-badge twitter-account__service-badge--bluesky">
                         <Icon icon="simple-icons:bluesky" />
                     </span>
+                    <span v-if="account.kind === 'Misskey'" class="twitter-account__service-badge twitter-account__service-badge--misskey">
+                        <Icon icon="simple-icons:misskey" />
+                    </span>
                     <span v-if="account.kind === 'Linked'" class="twitter-account__service-badge twitter-account__service-badge--linked">
-                        <span class="twitter-account__service-badge-segment twitter-account__service-badge-segment--twitter">
-                            <Icon icon="fa-brands:twitter" />
-                        </span>
-                        <span class="twitter-account__service-badge-segment twitter-account__service-badge-segment--bluesky">
-                            <Icon icon="simple-icons:bluesky" />
+                        <span v-for="seg in getLinkedAccountServiceSegments(account.account_link)" :key="seg.icon"
+                            class="twitter-account__service-badge-segment" :class="`twitter-account__service-badge-segment--${seg.cls}`">
+                            <Icon :icon="seg.icon" />
                         </span>
                     </span>
                 </div>
@@ -172,9 +177,10 @@
                         <span class="twitter-account__text">{{row.text}}</span>
                     </div>
                     <span v-if="account.kind === 'Linked'" class="twitter-account__screen-name">
-                        <span class="twitter-account__screen-name-handle">@{{account.account_link.twitter_account.screen_name}}</span>
-                        <Icon class="twitter-account__screen-name-link-icon" icon="fluent:link-20-filled" />
-                        <span class="twitter-account__screen-name-handle">@{{account.account_link.bluesky_account.handle}}</span>
+                        <template v-for="(handle, index) in getLinkedAccountHandles(account.account_link)" :key="handle">
+                            <Icon v-if="index > 0" class="twitter-account__screen-name-link-icon" icon="fluent:link-20-filled" />
+                            <span class="twitter-account__screen-name-handle">{{handle}}</span>
+                        </template>
                     </span>
                     <span v-else class="twitter-account__screen-name">
                         <span class="twitter-account__screen-name-handle">{{getSelectableAccountDisplayId(account)}}</span>
@@ -200,9 +206,10 @@ import TwitterCaptures from '@/components/Watch/Panel/Twitter/Captures.vue';
 import TwitterSearch from '@/components/Watch/Panel/Twitter/Search.vue';
 import TwitterTimeline from '@/components/Watch/Panel/Twitter/Timeline.vue';
 import Bluesky from '@/services/Bluesky';
+import Misskey from '@/services/Misskey';
 import { IProgram } from '@/services/Programs';
 import Twitter from '@/services/Twitter';
-import { ISelectableAccount } from '@/services/Users';
+import { IAccountLink, ISelectableAccount } from '@/services/Users';
 import useChannelsStore from '@/stores/ChannelsStore';
 import usePlayerStore from '@/stores/PlayerStore';
 import useSettingsStore, { ITwitterPanelPostTarget } from '@/stores/SettingsStore';
@@ -271,6 +278,7 @@ interface ITweetPostSettledResult {
 interface ITweetPostTargetSnapshot {
     twitter_screen_name: string | null;
     bluesky_handle: string | null;
+    misskey_account_id: number | null;
 }
 
 export default defineComponent({
@@ -341,21 +349,27 @@ export default defineComponent({
 
         selectedAccountIconUrl(): string {
             const account = this.twitterStore.selected_account;
-            // 紐付けアカウントの代表表示は既存 Twitter タブの見え方を保つため Twitter 側へ寄せる
-            // Bluesky 側の識別はアカウント選択リスト内のバッジと二段表示で補う
             if (account?.kind === 'Twitter') return account.twitter_account.icon_url;
             if (account?.kind === 'Bluesky') return account.bluesky_account.icon_url || '/assets/images/account-icon-default.png';
-            if (account?.kind === 'Linked') return account.account_link.twitter_account.icon_url;
+            if (account?.kind === 'Misskey') return account.misskey_account.icon_url || '/assets/images/account-icon-default.png';
+            // 紐付けアカウントの代表アイコンは先頭の非 null アカウントのものを使う
+            if (account?.kind === 'Linked') {
+                const link = account.account_link;
+                return link.twitter_account?.icon_url ?? link.bluesky_account?.icon_url ?? link.misskey_account?.icon_url ?? '/assets/images/account-icon-default.png';
+            }
             return '/assets/images/account-icon-default.png';
         },
 
         selectedAccountDisplayId(): string {
             const account = this.twitterStore.selected_account;
-            // 入力欄横の短い ID 表示は一行に収める必要があるため、紐付け時は代表として Twitter 側を出す
-            // Bluesky 側の handle はドロップダウン内で省略表示込みの二段表示に任せる
             if (account?.kind === 'Twitter') return `@${account.twitter_account.screen_name}`;
             if (account?.kind === 'Bluesky') return `@${account.bluesky_account.handle}`;
-            if (account?.kind === 'Linked') return `@${account.account_link.twitter_account.screen_name}`;
+            if (account?.kind === 'Misskey') return `@${account.misskey_account.username}@${account.misskey_account.instance_url}`;
+            if (account?.kind === 'Linked') {
+                const link = account.account_link;
+                const id = link.twitter_account?.screen_name ?? link.bluesky_account?.handle ?? `${link.misskey_account?.username}@${link.misskey_account?.instance_url}`;
+                return `@${id}`;
+            }
             return '連携されていません';
         },
 
@@ -373,8 +387,17 @@ export default defineComponent({
             return false;
         },
 
+        shouldPostToMisskey(): boolean {
+            const account = this.twitterStore.selected_account;
+            if (account?.kind === 'Misskey') return true;
+            if (account?.kind === 'Linked') return this.linkedPostTarget.is_post_to_misskey;
+            return false;
+        },
+
         shouldPostToBothServices(): boolean {
-            return this.shouldPostToTwitter === true && this.shouldPostToBluesky === true;
+            return (this.shouldPostToTwitter === true && this.shouldPostToBluesky === true) ||
+                (this.shouldPostToTwitter === true && this.shouldPostToMisskey === true) ||
+                (this.shouldPostToBluesky === true && this.shouldPostToMisskey === true);
         },
 
         isLinkedPostTargetBoth(): boolean {
@@ -393,21 +416,30 @@ export default defineComponent({
 
         linkedPostTarget(): ITwitterPanelPostTarget {
             const linked_post_target_key = this.linkedPostTargetKey;
-            if (linked_post_target_key === null) {
-                return {
-                    is_post_to_twitter: true,
-                    is_post_to_bluesky: true,
-                };
+            const account = this.twitterStore.selected_account;
+            if (linked_post_target_key === null || account?.kind !== 'Linked') {
+                return { is_post_to_twitter: true, is_post_to_bluesky: true, is_post_to_misskey: false };
             }
-            return this.settingsStore.settings.twitter_panel_post_targets[linked_post_target_key] ?? {
-                is_post_to_twitter: true,
-                is_post_to_bluesky: true,
+            // リンクの種別に応じたデフォルト値 (LocalStorage に値がない初回)
+            const link = account.account_link;
+            const default_target: ITwitterPanelPostTarget = {
+                is_post_to_twitter: link.twitter_account !== null,
+                is_post_to_bluesky: link.bluesky_account !== null,
+                is_post_to_misskey: link.misskey_account !== null,
+            };
+            const stored = this.settingsStore.settings.twitter_panel_post_targets[linked_post_target_key];
+            // 既存の LocalStorage 値は is_post_to_misskey が undefined の場合があるため、デフォルト値でフォールバックする
+            if (stored === undefined) return default_target;
+            return {
+                is_post_to_twitter: stored.is_post_to_twitter,
+                is_post_to_bluesky: stored.is_post_to_bluesky,
+                is_post_to_misskey: stored.is_post_to_misskey ?? default_target.is_post_to_misskey,
             };
         },
 
         tweetButtonLabel(): string {
-            // Bluesky 単独投稿では「ポスト」に変え、Twitter を含む場合は抗議的に残している「ツイート」を維持する
-            if (this.shouldPostToTwitter === false && this.shouldPostToBluesky === true) {
+            // Twitter を含む投稿は「ツイート」を維持し、Bluesky / Misskey 単独は「ポスト」にする
+            if (this.shouldPostToTwitter === false && (this.shouldPostToBluesky === true || this.shouldPostToMisskey === true)) {
                 return 'ポスト';
             }
             return 'ツイート';
@@ -415,9 +447,10 @@ export default defineComponent({
 
         tweetButtonClass(): Record<string, boolean> {
             return {
-                'tweet-button--twitter': this.shouldPostToTwitter === true && this.shouldPostToBluesky === false,
-                'tweet-button--bluesky': this.shouldPostToTwitter === false && this.shouldPostToBluesky === true,
-                'tweet-button--both': this.shouldPostToTwitter === true && this.shouldPostToBluesky === true,
+                'tweet-button--twitter': this.shouldPostToTwitter === true && this.shouldPostToBluesky === false && this.shouldPostToMisskey === false,
+                'tweet-button--bluesky': this.shouldPostToTwitter === false && this.shouldPostToBluesky === true && this.shouldPostToMisskey === false,
+                'tweet-button--misskey': this.shouldPostToTwitter === false && this.shouldPostToBluesky === false && this.shouldPostToMisskey === true,
+                'tweet-button--both': this.shouldPostToBothServices,
             };
         },
 
@@ -607,15 +640,44 @@ export default defineComponent({
             // DB 上の連番 ID はテーブルごとに重複しうるため、種別を含めたキーで選択状態を安定させる
             if (account.kind === 'Twitter') return `Twitter-${account.twitter_account.id}`;
             if (account.kind === 'Bluesky') return `Bluesky-${account.bluesky_account.id}`;
+            if (account.kind === 'Misskey') return `Misskey-${account.misskey_account.id}`;
             return `Linked-${account.account_link.id}`;
         },
 
         getSelectableAccountIconUrl(account: ISelectableAccount): string {
-            // 紐付け行は Twitter 側を主アイコン、Bluesky 側を重ねバッジにする
-            // 丸アバター同士を合成せず、既存の Twitter アカウント選択体験を崩さない
             if (account.kind === 'Twitter') return account.twitter_account.icon_url;
             if (account.kind === 'Bluesky') return account.bluesky_account.icon_url || '/assets/images/account-icon-default.png';
-            return account.account_link.twitter_account.icon_url;
+            if (account.kind === 'Misskey') return account.misskey_account.icon_url || '/assets/images/account-icon-default.png';
+            // 紐付けアカウントは先頭の非 null アカウントを代表アイコンにする
+            const link = account.account_link;
+            return link.twitter_account?.icon_url ?? link.bluesky_account?.icon_url ?? link.misskey_account?.icon_url ?? '/assets/images/account-icon-default.png';
+        },
+
+        /** 紐付けアカウントの 2 番目アイコン URL (1 番目以外の最初の非 null アカウント) */
+        getLinkedAccountSecondaryIconUrl(link: IAccountLink): string {
+            // Twitter が代表なら Bluesky → Misskey の順で 2 番目を探す
+            if (link.twitter_account !== null) {
+                return link.bluesky_account?.icon_url ?? link.misskey_account?.icon_url ?? '';
+            }
+            return link.misskey_account?.icon_url ?? '';
+        },
+
+        /** 紐付けアカウントのサービスバッジセグメント (最大 2 つ) */
+        getLinkedAccountServiceSegments(link: IAccountLink): {icon: string; cls: string}[] {
+            const segs: {icon: string; cls: string}[] = [];
+            if (link.twitter_account !== null) segs.push({icon: 'fa-brands:twitter', cls: 'twitter'});
+            if (link.bluesky_account !== null) segs.push({icon: 'simple-icons:bluesky', cls: 'bluesky'});
+            if (link.misskey_account !== null) segs.push({icon: 'simple-icons:misskey', cls: 'misskey'});
+            return segs.slice(0, 2);
+        },
+
+        /** 紐付けアカウントの表示用ハンドル一覧 (@xxx 形式、最大 2 つ) */
+        getLinkedAccountHandles(link: IAccountLink): string[] {
+            const handles: string[] = [];
+            if (link.twitter_account !== null) handles.push(`@${link.twitter_account.screen_name}`);
+            if (link.bluesky_account !== null) handles.push(`@${link.bluesky_account.handle}`);
+            if (link.misskey_account !== null) handles.push(`@${link.misskey_account.username}@${link.misskey_account.instance_url}`);
+            return handles;
         },
 
         getSelectableAccountNameRows(account: ISelectableAccount): ISelectableAccountDisplayRow[] {
@@ -625,20 +687,23 @@ export default defineComponent({
             if (account.kind === 'Bluesky') {
                 return [{id: 'bluesky-name', text: account.bluesky_account.name}];
             }
-
-            const twitter_name = account.account_link.twitter_account.name;
-            const bluesky_name = account.account_link.bluesky_account.name;
-
-            // 表示名が完全一致する場合は重複表示せず、1行だけ出す
-            if (twitter_name === bluesky_name) {
-                return [{id: 'shared-name', text: twitter_name}];
+            if (account.kind === 'Misskey') {
+                return [{id: 'misskey-name', text: account.misskey_account.name}];
             }
 
-            // 表示名が異なる場合だけサービスアイコン付きで2段表示する
-            return [
-                {id: 'twitter-name', icon: 'fa-brands:twitter', text: twitter_name},
-                {id: 'bluesky-name', icon: 'simple-icons:bluesky', text: bluesky_name},
-            ];
+            // 紐付けアカウント: 非 null なアカウントの表示名を収集する
+            const link = account.account_link;
+            const names: {id: string; icon: string; text: string}[] = [];
+            if (link.twitter_account !== null) names.push({id: 'twitter-name', icon: 'fa-brands:twitter', text: link.twitter_account.name});
+            if (link.bluesky_account !== null) names.push({id: 'bluesky-name', icon: 'simple-icons:bluesky', text: link.bluesky_account.name});
+            if (link.misskey_account !== null) names.push({id: 'misskey-name', icon: 'simple-icons:misskey', text: link.misskey_account.name});
+
+            // 全アカウントの表示名が一致する場合は1行にまとめる
+            const unique_names = [...new Set(names.map(n => n.text))];
+            if (unique_names.length === 1) {
+                return [{id: 'shared-name', text: unique_names[0]!}];
+            }
+            return names;
         },
 
         getSelectableAccountDisplayId(account: ISelectableAccount): string {
@@ -648,7 +713,12 @@ export default defineComponent({
             if (account.kind === 'Bluesky') {
                 return `@${account.bluesky_account.handle}`;
             }
-            return `@${account.account_link.twitter_account.screen_name}`;
+            if (account.kind === 'Misskey') {
+                return `@${account.misskey_account.username}@${account.misskey_account.instance_url}`;
+            }
+            const link = account.account_link;
+            const id = link.twitter_account?.screen_name ?? link.bluesky_account?.handle ?? `${link.misskey_account?.username}@${link.misskey_account?.instance_url}`;
+            return `@${id}`;
         },
 
         isSelectableAccountSelected(account: ISelectableAccount): boolean {
@@ -672,24 +742,65 @@ export default defineComponent({
 
         cycleLinkedPostTarget() {
             const linked_post_target_key = this.linkedPostTargetKey;
-            if (linked_post_target_key === null) {
+            const account = this.twitterStore.selected_account;
+            if (linked_post_target_key === null || account?.kind !== 'Linked') {
                 return;
             }
-            const current_twitter = this.linkedPostTarget.is_post_to_twitter;
-            const current_bluesky = this.linkedPostTarget.is_post_to_bluesky;
-            let is_post_to_twitter = true;
-            let is_post_to_bluesky = true;
-            // 両方 → Twitter のみ → Bluesky のみ → 両方 の順で循環させ、空送信先の状態は作らない
-            if (current_twitter === true && current_bluesky === true) {
-                is_post_to_twitter = true;
-                is_post_to_bluesky = false;
-            } else if (current_twitter === true && current_bluesky === false) {
-                is_post_to_twitter = false;
-                is_post_to_bluesky = true;
+            const link = account.account_link;
+            const has_twitter = link.twitter_account !== null;
+            const has_bluesky = link.bluesky_account !== null;
+            const has_misskey = link.misskey_account !== null;
+            const cur = this.linkedPostTarget;
+
+            // 非 null なサービスの組み合わせで循環させる (両方 → A のみ → B のみ → 両方)
+            let next_twitter = has_twitter;
+            let next_bluesky = has_bluesky;
+            let next_misskey = has_misskey;
+
+            if (has_twitter && has_bluesky && has_misskey) {
+                // Twitter + Bluesky + Misskey: 全て → Twitter のみ → Bluesky のみ → Misskey のみ → 全て
+                if (cur.is_post_to_twitter && cur.is_post_to_bluesky && cur.is_post_to_misskey) {
+                    [next_twitter, next_bluesky, next_misskey] = [true, false, false];
+                } else if (cur.is_post_to_twitter && !cur.is_post_to_bluesky && !cur.is_post_to_misskey) {
+                    [next_twitter, next_bluesky, next_misskey] = [false, true, false];
+                } else if (cur.is_post_to_bluesky && !cur.is_post_to_twitter && !cur.is_post_to_misskey) {
+                    [next_twitter, next_bluesky, next_misskey] = [false, false, true];
+                } else {
+                    [next_twitter, next_bluesky, next_misskey] = [true, true, true];
+                }
+            } else if (has_twitter && has_bluesky && !has_misskey) {
+                // Twitter + Bluesky: 両方 → Twitter のみ → Bluesky のみ → 両方
+                if (cur.is_post_to_twitter && cur.is_post_to_bluesky) {
+                    [next_twitter, next_bluesky] = [true, false];
+                } else if (cur.is_post_to_twitter) {
+                    [next_twitter, next_bluesky] = [false, true];
+                } else {
+                    [next_twitter, next_bluesky] = [true, true];
+                }
+            } else if (has_twitter && has_misskey && !has_bluesky) {
+                // Twitter + Misskey: 両方 → Twitter のみ → Misskey のみ → 両方
+                if (cur.is_post_to_twitter && cur.is_post_to_misskey) {
+                    [next_twitter, next_misskey] = [true, false];
+                } else if (cur.is_post_to_twitter) {
+                    [next_twitter, next_misskey] = [false, true];
+                } else {
+                    [next_twitter, next_misskey] = [true, true];
+                }
+            } else if (has_bluesky && has_misskey && !has_twitter) {
+                // Bluesky + Misskey: 両方 → Bluesky のみ → Misskey のみ → 両方
+                if (cur.is_post_to_bluesky && cur.is_post_to_misskey) {
+                    [next_bluesky, next_misskey] = [true, false];
+                } else if (cur.is_post_to_bluesky) {
+                    [next_bluesky, next_misskey] = [false, true];
+                } else {
+                    [next_bluesky, next_misskey] = [true, true];
+                }
             }
+
             this.settingsStore.settings.twitter_panel_post_targets[linked_post_target_key] = {
-                is_post_to_twitter,
-                is_post_to_bluesky,
+                is_post_to_twitter: next_twitter,
+                is_post_to_bluesky: next_bluesky,
+                is_post_to_misskey: next_misskey,
             };
         },
 
@@ -880,7 +991,7 @@ export default defineComponent({
             // 送信先トグルは送信中でも操作できるため、以降の処理では現在値を見ない
             // ここで固定した送信先だけを使い、API 呼び出しと完了通知の整合性を保つ
             const post_target_snapshot = this.createTweetPostTargetSnapshot();
-            if (post_target_snapshot.twitter_screen_name === null && post_target_snapshot.bluesky_handle === null) {
+            if (post_target_snapshot.twitter_screen_name === null && post_target_snapshot.bluesky_handle === null && post_target_snapshot.misskey_account_id === null) {
                 this.is_tweet_sending = false;
                 return;
             }
@@ -960,6 +1071,15 @@ export default defineComponent({
                         this.sendBlueskyPostWithReplyThread(post_target_snapshot.bluesky_handle, tweet_text, tweet_capture_blobs, hashtag_key)),
                 });
             }
+            if (post_target_snapshot.misskey_account_id !== null) {
+                // Misskey 送信: 押下時点の account_id へ固定する
+                const misskey_account_id = post_target_snapshot.misskey_account_id;
+                send_results.push({
+                    service: 'Bluesky',  // 通知 UI は Bluesky と同じ扱いでよい (Twitter 以外 = 「ポスト」)
+                    promise: this.sendTweetToService('Bluesky',
+                        Misskey.sendPost(misskey_account_id, tweet_text, tweet_capture_blobs)),
+                });
+            }
 
             await this.notifyTweetPostResults(send_results);
 
@@ -977,35 +1097,31 @@ export default defineComponent({
 
             const account = this.twitterStore.selected_account;
             // 単独 Twitter アカウントでは Twitter だけへ送る
-            // 紐付けアカウントのトグル状態は存在しないため、現在の選択アカウントそのものが送信先になる
             if (account?.kind === 'Twitter') {
-                return {
-                    twitter_screen_name: account.twitter_account.screen_name,
-                    bluesky_handle: null,
-                };
+                return {twitter_screen_name: account.twitter_account.screen_name, bluesky_handle: null, misskey_account_id: null};
             }
             // 単独 Bluesky アカウントでは Bluesky だけへ送る
-            // 通知文もこのスナップショットに基づいて単体送信として扱う
             if (account?.kind === 'Bluesky') {
-                return {
-                    twitter_screen_name: null,
-                    bluesky_handle: account.bluesky_account.handle,
-                };
+                return {twitter_screen_name: null, bluesky_handle: account.bluesky_account.handle, misskey_account_id: null};
+            }
+            // 単独 Misskey アカウントでは Misskey だけへ送る
+            if (account?.kind === 'Misskey') {
+                return {twitter_screen_name: null, bluesky_handle: null, misskey_account_id: account.misskey_account.id};
             }
             // 紐付けアカウントでは投稿ボタン押下時点のトグル状態を固定する
             // 画像処理や API 待ちの間にユーザーがトグルを変更しても、この送信の宛先と通知内容は変えない
             if (account?.kind === 'Linked') {
-                // 投稿ボタンを押した瞬間のトグル状態を固定する
-                // 送信中にユーザーが送信先を切り替えても、この送信と完了通知は押下時点の対象だけを参照する
+                const target = this.linkedPostTarget;
                 return {
-                    twitter_screen_name: this.linkedPostTarget.is_post_to_twitter === true ? account.account_link.twitter_account.screen_name : null,
-                    bluesky_handle: this.linkedPostTarget.is_post_to_bluesky === true ? account.account_link.bluesky_account.handle : null,
+                    twitter_screen_name: target.is_post_to_twitter && account.account_link.twitter_account !== null
+                        ? account.account_link.twitter_account.screen_name : null,
+                    bluesky_handle: target.is_post_to_bluesky && account.account_link.bluesky_account !== null
+                        ? account.account_link.bluesky_account.handle : null,
+                    misskey_account_id: target.is_post_to_misskey && account.account_link.misskey_account !== null
+                        ? account.account_link.misskey_account.id : null,
                 };
             }
-            return {
-                twitter_screen_name: null,
-                bluesky_handle: null,
-            };
+            return {twitter_screen_name: null, bluesky_handle: null, misskey_account_id: null};
         },
 
         async sendTweetWithReplyThread(

@@ -18,6 +18,7 @@ from app.utils import Interlaced
 if TYPE_CHECKING:
     from app.models.AccountLink import AccountLink
     from app.models.BlueskyAccount import BlueskyAccount
+    from app.models.MisskeyAccount import MisskeyAccount
     from app.models.TwitterAccount import TwitterAccount
 
 
@@ -39,6 +40,7 @@ class User(TortoiseModel):
     niconico_refresh_token = cast(TortoiseField[str | None], fields.TextField(null=True))
     twitter_accounts: fields.ReverseRelation[TwitterAccount]
     bluesky_accounts: fields.ReverseRelation[BlueskyAccount]
+    misskey_accounts: fields.ReverseRelation[MisskeyAccount]
     account_links: fields.ReverseRelation[AccountLink]
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)

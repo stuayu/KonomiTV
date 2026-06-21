@@ -1,7 +1,7 @@
 
 import { defineStore } from 'pinia';
 
-import { IAccountLink, IBlueskyAccount, ISelectableAccount, ITwitterAccount } from '@/services/Users';
+import { IAccountLink, IBlueskyAccount, IMisskeyAccount, ISelectableAccount, ITwitterAccount } from '@/services/Users';
 import useSettingsStore from '@/stores/SettingsStore';
 import useUserStore from '@/stores/UserStore';
 
@@ -47,6 +47,7 @@ const useTwitterStore = defineStore('twitter', {
                 const selectable_accounts = this.buildSelectableAccounts(
                     user_store.user?.twitter_accounts ?? [],
                     user_store.user?.bluesky_accounts ?? [],
+                    user_store.user?.misskey_accounts ?? [],
                     user_store.user?.account_links ?? [],
                 );
                 this.selectable_accounts = selectable_accounts;
@@ -89,18 +90,27 @@ const useTwitterStore = defineStore('twitter', {
          * ユーザー情報から Twitter タブで選択可能なアカウント一覧を生成する
          * @param twitter_accounts Twitter アカウント一覧
          * @param bluesky_accounts Bluesky アカウント一覧
-         * @param account_links Twitter / Bluesky 紐付け一覧
+         * @param misskey_accounts Misskey アカウント一覧
+         * @param account_links SNS アカウント紐付け一覧
          * @returns 選択可能なアカウント一覧
          */
         buildSelectableAccounts(
             twitter_accounts: ITwitterAccount[],
             bluesky_accounts: IBlueskyAccount[],
+            misskey_accounts: IMisskeyAccount[],
             account_links: IAccountLink[],
         ): ISelectableAccount[] {
             // 紐付け済みの個別アカウントを単独候補にも出すと二重投稿や選択の混乱につながるため、先に ID 集合を作る
-            const linked_twitter_account_ids = new Set(account_links.map(account_link => account_link.twitter_account.id));
-            const linked_bluesky_account_ids = new Set(account_links.map(account_link => account_link.bluesky_account.id));
-            // 紐付けアカウントを優先表示し、その後に未紐付けの Twitter / Bluesky 単独アカウントを並べる
+            const linked_twitter_account_ids = new Set(
+                account_links.flatMap(l => l.twitter_account !== null ? [l.twitter_account.id] : []),
+            );
+            const linked_bluesky_account_ids = new Set(
+                account_links.flatMap(l => l.bluesky_account !== null ? [l.bluesky_account.id] : []),
+            );
+            const linked_misskey_account_ids = new Set(
+                account_links.flatMap(l => l.misskey_account !== null ? [l.misskey_account.id] : []),
+            );
+            // 紐付けアカウントを優先表示し、その後に未紐付けの単独アカウントを並べる
             return [
                 ...account_links.map(account_link => ({ kind: 'Linked' as const, account_link })),
                 ...twitter_accounts
@@ -109,6 +119,9 @@ const useTwitterStore = defineStore('twitter', {
                 ...bluesky_accounts
                     .filter(bluesky_account => linked_bluesky_account_ids.has(bluesky_account.id) === false)
                     .map(bluesky_account => ({ kind: 'Bluesky' as const, bluesky_account })),
+                ...misskey_accounts
+                    .filter(misskey_account => linked_misskey_account_ids.has(misskey_account.id) === false)
+                    .map(misskey_account => ({ kind: 'Misskey' as const, misskey_account })),
             ];
         },
 
@@ -130,6 +143,9 @@ const useTwitterStore = defineStore('twitter', {
                 if (account.kind === 'Bluesky') {
                     return saved_account.kind === 'Bluesky' && account.bluesky_account.id === saved_account.id;
                 }
+                if (account.kind === 'Misskey') {
+                    return saved_account.kind === 'Misskey' && account.misskey_account.id === saved_account.id;
+                }
                 return saved_account.kind === 'Linked' && account.account_link.id === saved_account.id;
             });
             return selected_account ?? selectable_accounts[0] ?? null;
@@ -150,8 +166,13 @@ const useTwitterStore = defineStore('twitter', {
             } else if (account.kind === 'Bluesky') {
                 this.selected_twitter_account = null;
                 settings_store.settings.selected_twitter_panel_account = {kind: 'Bluesky', id: account.bluesky_account.id};
+            } else if (account.kind === 'Misskey') {
+                // Misskey 単独選択: Twitter API は使わないため selected_twitter_account を null にする
+                this.selected_twitter_account = null;
+                settings_store.settings.selected_twitter_panel_account = {kind: 'Misskey', id: account.misskey_account.id};
             } else {
-                this.selected_twitter_account = account.account_link.twitter_account;
+                // 紐付けアカウント: Twitter が含まれる場合はその screen_name を Keep-Alive 対象にする
+                this.selected_twitter_account = account.account_link.twitter_account ?? null;
                 settings_store.settings.selected_twitter_panel_account = {kind: 'Linked', id: account.account_link.id};
             }
         },

@@ -1,222 +1,216 @@
-import aiohttp
-import asyncio
-import random
-from typing import List
 
-from app import logging
+from typing import Annotated
 
-from misskey import Misskey
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
+from tortoise.exceptions import IntegrityError
+
+from app import logging, schemas
+from app.models.MisskeyAccount import MisskeyAccount
+from app.models.User import User
+from app.routers.UsersRouter import GetCurrentUser
+from app.utils.MisskeyAPI import MisskeyAPI
 
 
-class MisskeyPost:
+# ルーター
+router = APIRouter(
+    tags = ['Misskey'],
+    prefix = '/api/misskey',
+)
+
+
+async def GetCurrentMisskeyAccount(
+    account_id: Annotated[int, Path(description='Misskey アカウントの DB ID 。')],
+    current_user: Annotated[User, Depends(GetCurrentUser)],
+) -> MisskeyAccount:
+    """ 現在ログイン中のユーザーに紐づく Misskey アカウントを DB ID で取得する """
+
+    # ログイン中ユーザーに紐づくレコードのみを対象にし、他ユーザーの認証情報へ触れないようにする
+    misskey_account = await MisskeyAccount.filter(user_id=current_user.id, id=account_id).get_or_none()
+    if misskey_account is None:
+        logging.error(f'[MisskeyRouter][GetCurrentMisskeyAccount] MisskeyAccount not found. [account_id: {account_id}]')
+        raise HTTPException(
+            status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail = 'MisskeyAccount associated with the given ID does not exist',
+        )
+
+    return misskey_account
+
+
+@router.post(
+    '/auth',
+    summary = 'Misskey 認証 API',
+    status_code = status.HTTP_204_NO_CONTENT,
+)
+async def MisskeyAuthAPI(
+    auth_request: Annotated[schemas.MisskeyAuthRequest, Body(description='Misskey 認証リクエスト')],
+    current_user: Annotated[User, Depends(GetCurrentUser)],
+):
     """
-    Misskey でメッセージを送信するクラス
+    指定されたインスタンス URL とアクセストークンで Misskey 連携を行い、ログイン中のユーザーアカウントと Misskey アカウントを紐づける。<br>
+    同じインスタンスの同じユーザー ID の連携が既に存在する場合はトークンと設定を更新する。<br>
+    JWT エンコードされたアクセストークンがリクエストの Authorization: Bearer に設定されていないとアクセスできない。
     """
 
-    def __init__(
-        self,
-        instance_url: str = "misskey.io",
-        access_token: str = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-        visibility: str = "home",
-        channelId: str = "9bem66cfb8",
-        logger: None = logging,  # type: ignore
-        image_upload_drive_id: str | None = "XXXXXXXXXXXXXXXXXXX",
-    ):
-        """初期化
+    # Misskey API で認証し、プロフィール情報を取得して未保存の ORM インスタンスを生成する
+    try:
+        misskey_account = await MisskeyAPI.authenticate(auth_request.instance_url, auth_request.access_token)
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logging.error('[MisskeyRouter][MisskeyAuthAPI] Failed to authenticate with Misskey:', exc_info=ex)
+        raise HTTPException(
+            status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail = 'Failed to authenticate with Misskey',
+        ) from ex
 
-        Args:
-            instance_url (str): 投稿するインスタンスアドレス
-            access_token (str): アクセストークン
-            visibility (str): 投稿先の表示条件
-            image_upload_drive_id (str | None, optional): ドライブフォルダのID. Defaults to None.
-        """
-        try:
-            self.misskey = Misskey(address=instance_url, i=access_token)
-            self.instance_url = instance_url
-            self.access_token = access_token
-            self.visibility = visibility
-            self.logger = logging
-            self.channelId = channelId
-            self.image_upload_drive_id = image_upload_drive_id
-        except Exception as e:
-            MisskeyPost.errorMisskeyPy(self, e)
+    # ユーザーに設定された投稿設定をアカウントに反映する
+    misskey_account.user = current_user
+    misskey_account.visibility = auth_request.visibility
+    misskey_account.channel_id = auth_request.channel_id or None
+    misskey_account.drive_folder_id = auth_request.drive_folder_id or None
 
-    async def sendAttachedMessage(self, message_misskey: str, file_ids: List[str]):
-        """画像つきノートを投稿する
+    # 同じインスタンスの同一ユーザー ID の連携が既に存在する場合はトークンと設定を更新する
+    existing_account = await MisskeyAccount.filter(
+        user_id=current_user.id,
+        instance_url=misskey_account.instance_url,
+        misskey_user_id=misskey_account.misskey_user_id,
+    ).get_or_none()
 
-        Args:
-            message_misskey (str): ノート本文
-            file_ids (List): アップロードした画像のIDが入っているリスト
-        """
-        if len(file_ids) <= 0:
-            return await MisskeyPost.sendMessage(self, message_misskey=message_misskey)
-        for i in range(0, 4):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    if self.channelId is None:
-                        # self.misskey.notes_create(
-                        #     message_misskey, file_ids=file_ids, visibility=self.visibility
-                        # )
-                        payload = {
-                            "i": self.access_token,
-                            "text": message_misskey,
-                            "poll": None,
-                            "cw": None,
-                            "localOnly": True,
-                            "visibility": self.visibility,
-                            "reactionAcceptance": None
-                        }
-                    else:
-                        payload = {
-                            "i": self.access_token,
-                            "text": message_misskey,
-                            "fileIds": file_ids,
-                            "channelId": self.channelId,
-                            "poll": None,
-                            "cw": None,
-                            "localOnly": True,
-                            "visibility": self.visibility,
-                            "reactionAcceptance": None
-                        }
-                    async with session.post(f'https://{self.instance_url}/api/notes/create', json=payload) as response:
-                        self.logger.debug(f"ステータスコード: {response.status}")
-                        response_text = await response.text()
-                        self.logger.debug(f"レスポンス本文: {response_text}")
+    if existing_account is not None:
+        existing_account.username = misskey_account.username
+        existing_account.name = misskey_account.name
+        existing_account.icon_url = misskey_account.icon_url
+        existing_account.access_token = misskey_account.access_token
+        existing_account.visibility = misskey_account.visibility
+        existing_account.channel_id = misskey_account.channel_id
+        existing_account.drive_folder_id = misskey_account.drive_folder_id
+        await existing_account.save()
+        logging.info(
+            f'[MisskeyRouter][MisskeyAuthAPI] Updated existing Misskey account. '
+            f'[id: {existing_account.id}, username: {existing_account.username}@{existing_account.instance_url}]',
+        )
+        return
 
-                        if response.status == 200:
-                            self.logger.debug(f"投稿が完了しました。{await response.json()}")
-                        else:
-                            self.logger.debug("投稿に失敗しました。")
-                            try:
-                                error_response = await response.json()
-                                self.logger.debug(f'エラーメッセージ:{error_response.get("error", "No error message provided")}')
-                            except aiohttp.ClientResponseError:
-                                self.logger.debug(f"エラーメッセージ:{response_text}")
-                break
-            except Exception as e:
-                if (
-                    getattr(e, "code", None)
-                    == "TIMELINE_HAYASUGI_YABAI"
-                ):
-                    await asyncio.sleep(60 * (i + 1))
-                    continue
-                elif (
-                    getattr(e, "code", None) == "INVALID_PARAM"
-                    or getattr(e, "code", None) == "NO_FREE_SPACE"
-                    or getattr(e, "code", None) == "RATE_LIMIT_EXCEEDED"
-                ):
-                    await MisskeyPost.sendMessage(self, message_misskey=message_misskey)
-                    break
-                else:
-                    await asyncio.sleep(random.randint(5, 60))
+    try:
+        await misskey_account.save()
+    except IntegrityError as ex:
+        # 同一ユーザー ID の連携が同時に走った場合の競合を吸収する
+        existing_account = await MisskeyAccount.filter(
+            user_id=current_user.id,
+            instance_url=misskey_account.instance_url,
+            misskey_user_id=misskey_account.misskey_user_id,
+        ).get_or_none()
+        if existing_account is None:
+            logging.error(
+                f'[MisskeyRouter][MisskeyAuthAPI] Failed to save Misskey account due to an unexpected integrity error. '
+                f'[user_id: {current_user.id}]',
+                exc_info=ex,
+            )
+            raise HTTPException(
+                status_code = status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail = 'Failed to link Misskey account',
+            ) from ex
+        existing_account.username = misskey_account.username
+        existing_account.name = misskey_account.name
+        existing_account.icon_url = misskey_account.icon_url
+        existing_account.access_token = misskey_account.access_token
+        existing_account.visibility = misskey_account.visibility
+        existing_account.channel_id = misskey_account.channel_id
+        existing_account.drive_folder_id = misskey_account.drive_folder_id
+        await existing_account.save()
+        logging.info(
+            f'[MisskeyRouter][MisskeyAuthAPI] Updated existing Misskey account after conflict. '
+            f'[id: {existing_account.id}, username: {existing_account.username}@{existing_account.instance_url}]',
+        )
+        return
 
-    async def sendMessage(self, message_misskey: str):
-        """ノートを投稿する
+    logging.info(
+        f'[MisskeyRouter][MisskeyAuthAPI] Created new Misskey account. '
+        f'[id: {misskey_account.id}, username: {misskey_account.username}@{misskey_account.instance_url}]',
+    )
 
-        Args:
-            message_misskey (str): ノート本文
-        """
-        for i in range(0, 4):
-            try:
-                self.logger.debug(f"message: {message_misskey}")
-                async with aiohttp.ClientSession() as session:
-                    if self.channelId is None:
-                        # res = self.misskey.notes_create(
-                        #     text=message_misskey, visibility=self.visibility
-                        # )
-                        # self.logger.debug(f"res: {res}")
-                        payload = {
-                            "i": self.access_token,
-                            "text": message_misskey,
-                            "poll": None,
-                            "cw": None,
-                            "localOnly": True,
-                            "visibility": self.visibility,
-                            "reactionAcceptance": None
-                        }
-                    else:
-                        payload = {
-                            "i": self.access_token,
-                            "text": message_misskey,
-                            "channelId": self.channelId,
-                            "poll": None,
-                            "cw": None,
-                            "localOnly": True,
-                            "visibility": self.visibility,
-                            "reactionAcceptance": None
-                        }
-                    async with session.post(f'https://{self.instance_url}/api/notes/create', json=payload) as response:
-                        self.logger.debug(f"ステータスコード: {response.status}")
-                        response_text = await response.text()
-                        self.logger.debug(f"レスポンス本文: {response_text}")
 
-                        if response.status == 200:
-                            self.logger.debug(f"投稿が完了しました。{await response.json()}")
-                        else:
-                            self.logger.debug("投稿に失敗しました。")
-                            try:
-                                error_response = await response.json()
-                                self.logger.debug(f'エラーメッセージ:{error_response.get("error", "No error message provided")}')
-                            except aiohttp.ClientResponseError:
-                                self.logger.debug(f"エラーメッセージ:{response_text}")
-                break
-            except Exception as e:
-                self.logger.error("ノートの作成に失敗しました。")
-                self.logger.error(f"code: {getattr(e, 'code', 'N/A')}")
-                MisskeyPost.errorMisskeyPy(self, e)
-                if (
-                    getattr(e, "code", None) == "TIMELINE_HAYASUGI_YABAI"
-                    or getattr(e, "code", None) == "RATE_LIMIT_EXCEEDED"
-                ):
-                    await asyncio.sleep(60 * (i + 1))
-                    continue
-                elif getattr(e, "code", None) == "INVALID_PARAM":
-                    break
-                else:
-                    await asyncio.sleep(random.randint(5, 60) * (i + 1))
-                self.logger.info(f"リトライ{i+1}回目")
+@router.delete(
+    '/accounts/{account_id}',
+    summary = 'Misskey アカウント連携解除 API',
+    status_code = status.HTTP_204_NO_CONTENT,
+)
+async def MisskeyAccountDeleteAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+):
+    """
+    指定された Misskey アカウントの連携を解除する。<br>
+    JWT エンコードされたアクセストークンがリクエストの Authorization: Bearer に設定されていないとアクセスできない。
+    """
 
-    async def uploadPictures(self, file: bytes, filename: str) -> str:
-        """画像をMisskeyのドライブにアップロードします。
-            ※この機能はドライブへのアクセス権限が必要です。
+    await misskey_account.delete()
+    logging.info(
+        f'[MisskeyRouter][MisskeyAccountDeleteAPI] Deleted Misskey account. '
+        f'[id: {misskey_account.id}, username: {misskey_account.username}@{misskey_account.instance_url}]',
+    )
 
-        Args:
-            file (bytes): 画像ファイルのバイナリデータ
-            filename (str): 画像ファイルの名前
 
-        Returns:
-            str: アップロードした画像のID
-        """
-        uploaded_media_id = ""
+@router.post(
+    '/accounts/{account_id}/posts',
+    summary = 'Misskey ノート投稿 API',
+    response_description = 'Misskey ノートの投稿結果。',
+    response_model = schemas.PostTweetResult | schemas.TwitterAPIResult,
+)
+async def MisskeyPostAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    post: Annotated[str, File(description='Misskey ノートの本文。')] = '',
+    images: Annotated[list[UploadFile], File(description='Misskey ノートに添付する画像 (4枚まで) 。')] = [],
+):
+    """
+    Misskey にノートを投稿する。投稿本文 or 画像のみ送信することもできる。<br>
+    投稿には account_id で指定した Misskey アカウントが利用される。
+    """
 
-        try:
-            async with aiohttp.ClientSession() as client:
-                form_data = aiohttp.FormData()
-                form_data.add_field('i', self.access_token)
-                form_data.add_field('folderId', self.image_upload_drive_id)
-                form_data.add_field('name', filename)
-                form_data.add_field('isSensitive', 'false')
-                form_data.add_field('force', 'false')
-                form_data.add_field('file', file, filename=filename)
+    return await MisskeyAPI(misskey_account).createNote(post, images)
 
-                async with client.post(f'https://{self.instance_url}/api/drive/files/create', data=form_data) as response:
-                    response_data = await response.json()
-                    uploaded_media_id = response_data["id"]
 
-        except Exception as e:
-            self.logger.error(f"code: {getattr(e, 'code', 'N/A')}")
+@router.get(
+    '/accounts/{account_id}/timeline',
+    summary = 'Misskey ホームタイムライン取得 API',
+    response_description = 'Misskey タイムラインのノートリスト。',
+    response_model = schemas.TimelineTweetsResult | schemas.TwitterAPIResult,
+)
+async def MisskeyTimelineAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    cursor_id: Annotated[str | None, Query(description='前回のレスポンスから取得した、次のページを取得するためのカーソル ID (until_id として渡す) 。')] = None,
+):
+    """
+    Misskey のホームタイムラインを取得する。<br>
+    ホームタイムラインの取得には account_id で指定した Misskey アカウントが利用される。
+    """
 
-        return uploaded_media_id
+    return await MisskeyAPI(misskey_account).homeTimeline(until_id=cursor_id)
 
-    def errorMisskeyPy(self, ExceptionObject):
-        self.logger.debug("errorMisskeyPy: 実行中")
-        try:
-            self.logger.debug(ExceptionObject, exc_info=True)
-            self.logger.error(f"id: {getattr(ExceptionObject, 'id', 'N/A')}")
-            self.logger.error(f"code: {getattr(ExceptionObject, 'code', 'N/A')}")
-            self.logger.error(f"message: {getattr(ExceptionObject, 'message', 'N/A')}")
-        except Exception:
-            pass
 
-    if __name__ == "__main__":
-        misskey_post_with_image()
+@router.get(
+    '/accounts/{account_id}/search',
+    summary = 'Misskey ノート検索 API',
+    response_description = 'Misskey 検索結果のノートリスト。',
+    response_model = schemas.TimelineTweetsResult | schemas.TwitterAPIResult,
+)
+async def MisskeySearchAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    query: Annotated[str, Query(description='検索クエリ。')],
+    cursor_id: Annotated[str | None, Query(description='前回のレスポンスから取得した、次のページを取得するためのカーソル ID 。')] = None,
+):
+    """
+    指定されたクエリで Misskey ノートを検索する。<br>
+    検索には account_id で指定した Misskey アカウントが利用される。
+    """
+
+    return await MisskeyAPI(misskey_account).searchNotes(query=query, until_id=cursor_id)

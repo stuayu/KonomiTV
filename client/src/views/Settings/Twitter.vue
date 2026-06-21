@@ -6,7 +6,7 @@
                 <Icon icon="fluent:chevron-left-12-filled" width="27px" />
             </a>
             <Icon icon="fa-brands:twitter" width="22px" />
-            <span class="ml-3">Twitter / Bluesky 連携</span>
+            <span class="ml-3">Twitter / Bluesky / Misskey 連携</span>
         </h2>
         <div class="settings__content" :class="{'settings__content--loading': is_loading}">
             <div class="twitter-accounts">
@@ -16,9 +16,9 @@
                 <div class="twitter-accounts__guide" v-if="has_no_linked_accounts">
                     <Icon class="flex-shrink-0" icon="fa-brands:twitter" width="45px" />
                     <div class="ml-4">
-                        <div class="font-weight-bold text-h6">Twitter / Bluesky アカウントと連携していません</div>
+                        <div class="font-weight-bold text-h6">Twitter / Bluesky / Misskey アカウントと連携していません</div>
                         <div class="text-text-darken-1 text-subtitle-2 mt-1">
-                            Twitter / Bluesky アカウントと連携すると、テレビを見ながらキャプ付きで実況ツイートしたり、ほかの実況ツイートをリアルタイムで表示できるようになります。
+                            Twitter / Bluesky / Misskey アカウントと連携すると、テレビを見ながらキャプ付きで実況ツイートしたり、ほかの実況ツイートをリアルタイムで表示できるようになります。
                         </div>
                     </div>
                 </div>
@@ -66,6 +66,28 @@
                         <Icon icon="fluent:plug-disconnected-20-filled" class="mr-2" height="24" />連携解除
                     </v-btn>
                 </div>
+                <div class="twitter-account"
+                    v-for="misskey_account in (userStore.user !== null ? userStore.user.misskey_accounts: [])"
+                    :key="`misskey-${misskey_account.id}`">
+                    <div class="twitter-account__icon-wrapper">
+                        <img class="twitter-account__icon" :src="misskey_account.icon_url || '/assets/images/account-icon-default.png'">
+                        <span class="twitter-account__service-badge twitter-account__service-badge--misskey">
+                            <Icon icon="simple-icons:misskey" />
+                        </span>
+                    </div>
+                    <div class="twitter-account__info">
+                        <div class="twitter-account__info-name">
+                            <span class="twitter-account__info-name-text">{{misskey_account.name}}</span>
+                        </div>
+                        <span class="twitter-account__info-screen-name">
+                            <span class="twitter-account__info-screen-name-handle">@{{misskey_account.username}}@{{misskey_account.instance_url}}</span>
+                        </span>
+                    </div>
+                    <v-btn class="twitter-account__logout ml-auto" width="124" height="52" variant="flat"
+                        @click="logoutMisskeyAccount(misskey_account.id)">
+                        <Icon icon="fluent:plug-disconnected-20-filled" class="mr-2" height="24" />連携解除
+                    </v-btn>
+                </div>
                 <v-btn class="twitter-account__login" color="secondary" max-width="300" height="50" variant="flat"
                     @click="loginTwitterAccountWithCookieForm()">
                     <Icon icon="fluent:plug-connected-20-filled" class="mr-2" height="24" />連携する Twitter アカウントを追加
@@ -73,6 +95,10 @@
                 <v-btn class="twitter-account__login twitter-account__login--bluesky" color="secondary" max-width="300" height="50" variant="flat"
                     @click="loginBlueskyAccountWithAppPasswordForm()">
                     <Icon icon="fluent:plug-connected-20-filled" class="mr-2" height="24" />連携する Bluesky アカウントを追加
+                </v-btn>
+                <v-btn class="twitter-account__login twitter-account__login--misskey" color="secondary" max-width="300" height="50" variant="flat"
+                    @click="loginMisskeyAccountWithTokenForm()">
+                    <Icon icon="fluent:plug-connected-20-filled" class="mr-2" height="24" />連携する Misskey アカウントを追加
                 </v-btn>
                 <v-dialog max-width="740" v-model="twitter_cookie_auth_dialog">
                     <v-card>
@@ -168,17 +194,72 @@
                         </v-card-actions>
                     </v-card>
                 </v-dialog>
+                <v-dialog max-width="590" v-model="misskey_auth_dialog">
+                    <v-card>
+                        <v-card-title class="d-flex justify-center pt-6 font-weight-bold">連携する Misskey アカウントを追加</v-card-title>
+                        <v-card-text class="pt-2 pb-0">
+                            <p>
+                                連携する Misskey インスタンスの URL と、そのインスタンスで発行した API アクセストークンを入力してください。
+                            </p>
+                            <p class="mt-1">
+                                アクセストークンは Misskey の設定 → API で発行できます。必要な権限は「ノートを作成・削除する」と「ドライブを操作する」です。
+                            </p>
+                            <p class="mt-1">
+                                ここで入力されたアクセストークンはローカルの KonomiTV サーバーに暗号化して保存されます。
+                            </p>
+                            <v-form class="settings__item" ref="misskey_form" @submit.prevent>
+                                <v-text-field class="settings__item-form mt-4" color="primary" variant="outlined"
+                                    label="インスタンス URL" placeholder="misskey.io"
+                                    v-model="misskey_instance_url" :density="is_form_dense ? 'compact' : 'default'"
+                                    :rules="[(value) => { if (!value || value.trim() === '') return 'インスタンス URL を入力してください。'; return true; }]">
+                                </v-text-field>
+                                <v-text-field class="settings__item-form mt-3" color="primary" variant="outlined"
+                                    label="API アクセストークン"
+                                    v-model="misskey_access_token" :density="is_form_dense ? 'compact' : 'default'"
+                                    :type="misskey_access_token_showing ? 'text' : 'password'"
+                                    :append-inner-icon="misskey_access_token_showing ? 'mdi-eye' : 'mdi-eye-off'"
+                                    @click:appendInner="misskey_access_token_showing = !misskey_access_token_showing"
+                                    :rules="[(value) => { if (!value || value.trim() === '') return 'アクセストークンを入力してください。'; return true; }]">
+                                </v-text-field>
+                                <v-select class="settings__item-form mt-3" color="primary" variant="outlined"
+                                    label="デフォルト公開範囲"
+                                    :density="is_form_dense ? 'compact' : 'default'"
+                                    :items="misskey_visibility_items" v-model="misskey_visibility">
+                                </v-select>
+                                <v-text-field class="settings__item-form mt-1" color="primary" variant="outlined"
+                                    label="チャンネル ID (省略可)" placeholder="9bem66cfb8"
+                                    v-model="misskey_channel_id" :density="is_form_dense ? 'compact' : 'default'"
+                                    hint="投稿先のチャンネル ID を指定するとチャンネルにのみ投稿されます。空欄の場合はチャンネルなしで投稿されます。"
+                                    persistent-hint>
+                                </v-text-field>
+                                <v-text-field class="settings__item-form mt-3" color="primary" variant="outlined"
+                                    label="ドライブフォルダ ID (省略可)"
+                                    v-model="misskey_drive_folder_id" :density="is_form_dense ? 'compact' : 'default'"
+                                    hint="画像のアップロード先となるドライブフォルダの ID を指定します。空欄の場合はルートフォルダに保存されます。"
+                                    persistent-hint>
+                                </v-text-field>
+                            </v-form>
+                        </v-card-text>
+                        <v-card-actions class="pt-4 px-6 pb-6">
+                            <v-spacer></v-spacer>
+                            <v-btn color="text" variant="text" height="40" @click="closeMisskeyAuthDialog()">キャンセル</v-btn>
+                            <v-btn color="secondary" variant="flat" height="40" class="px-4" @click="loginMisskeyAccountWithToken()">
+                                <Icon icon="fa:sign-in" class="mr-2" height="17px" />連携
+                            </v-btn>
+                        </v-card-actions>
+                    </v-card>
+                </v-dialog>
             </div>
             <div class="twitter-accounts mt-6">
                 <div class="twitter-accounts__heading">
-                    <Icon icon="fluent:link-20-filled" class="mr-2" height="28" />紐付け中の Twitter / Bluesky アカウント
+                    <Icon icon="fluent:link-20-filled" class="mr-2" height="28" />紐付け中のアカウント
                 </div>
                 <div class="twitter-accounts__guide mt-4" v-if="userStore.user === null || userStore.user.account_links.length === 0">
                     <Icon class="flex-shrink-0" icon="fluent:link-20-filled" width="45px" />
                     <div class="ml-4">
-                        <div class="font-weight-bold text-h6">紐付け中の Twitter / Bluesky アカウントはありません</div>
+                        <div class="font-weight-bold text-h6">紐付け中のアカウントはありません</div>
                         <div class="text-text-darken-1 text-subtitle-2 mt-1">
-                            Twitter と Bluesky のアカウントを紐付けると、視聴画面で両方のタイムラインをまとめて表示し、両方に同時に実況ツイートを投稿できます。
+                            Twitter / Bluesky / Misskey のアカウントを 2 つ紐付けると、視聴画面でまとめてタイムラインを表示し、同時に実況を投稿できます。
                         </div>
                     </div>
                 </div>
@@ -186,8 +267,10 @@
                     v-for="account_link in (userStore.user !== null ? userStore.user.account_links: [])"
                     :key="account_link.id">
                     <div class="linked-account-icon">
-                        <img class="twitter-account__icon" :src="account_link.twitter_account.icon_url">
-                        <img class="linked-account-icon__badge" :src="account_link.bluesky_account.icon_url || '/assets/images/account-icon-default.png'">
+                        <img class="twitter-account__icon"
+                            :src="(account_link.twitter_account?.icon_url ?? account_link.bluesky_account?.icon_url ?? account_link.misskey_account?.icon_url) || '/assets/images/account-icon-default.png'">
+                        <img class="linked-account-icon__badge"
+                            :src="getAccountLinkSecondaryIconUrl(account_link) || '/assets/images/account-icon-default.png'">
                     </div>
                     <div class="twitter-account__info">
                         <div v-for="row in getAccountLinkNameRows(account_link)" :key="row.id" class="twitter-account__info-name">
@@ -195,9 +278,10 @@
                             <span class="twitter-account__info-name-text">{{row.text}}</span>
                         </div>
                         <span class="twitter-account__info-screen-name">
-                            <span class="twitter-account__info-screen-name-handle">@{{account_link.twitter_account.screen_name}}</span>
-                            <Icon class="twitter-account__info-screen-name-link-icon" icon="fluent:link-20-filled" height="17px" />
-                            <span class="twitter-account__info-screen-name-handle">@{{account_link.bluesky_account.handle}}</span>
+                            <template v-for="(handle, index) in getAccountLinkHandles(account_link)" :key="handle">
+                                <Icon v-if="index > 0" class="twitter-account__info-screen-name-link-icon" icon="fluent:link-20-filled" height="17px" />
+                                <span class="twitter-account__info-screen-name-handle">{{handle}}</span>
+                            </template>
                         </span>
                     </div>
                     <v-btn class="twitter-account__logout ml-auto" width="124" height="52" variant="flat"
@@ -206,19 +290,36 @@
                     </v-btn>
                 </div>
                 <v-btn class="twitter-account__login" color="secondary" max-width="330" height="50" variant="flat"
-                    :disabled="account_link_twitter_items.length === 0 || account_link_bluesky_items.length === 0"
+                    :disabled="!canCreateAccountLink"
                     @click="account_link_dialog = true">
                     <Icon icon="fluent:link-add-20-filled" class="mr-2" height="24" />紐付けを追加
                 </v-btn>
                 <v-dialog max-width="560" v-model="account_link_dialog">
                     <v-card>
-                        <v-card-title class="d-flex justify-center pt-6 font-weight-bold">Twitter と Bluesky のアカウントを紐付ける</v-card-title>
-                        <v-card-text class="pt-2 pb-0">
+                        <v-card-title class="d-flex justify-center pt-6 font-weight-bold">SNS アカウントを紐付ける</v-card-title>
+                        <v-card-text class="pt-2 pb-4">
+                            <p class="text-text-darken-1 text-subtitle-2">
+                                紐付けるサービスを 2 つ選んでください。紐付け後は視聴画面で両方に同時投稿できます。
+                            </p>
                             <v-select class="settings__item-form mt-4" color="primary" variant="outlined"
-                                label="Twitter アカウント" :items="account_link_twitter_items" v-model="account_link_twitter_account_id">
+                                label="紐付けの種類"
+                                :density="is_form_dense ? 'compact' : 'default'"
+                                :items="account_link_type_items" v-model="account_link_type">
                             </v-select>
-                            <v-select class="settings__item-form mt-3" color="primary" variant="outlined"
-                                label="Bluesky アカウント" :items="account_link_bluesky_items" v-model="account_link_bluesky_account_id">
+                            <v-select v-if="account_link_type === 'Twitter+Bluesky' || account_link_type === 'Twitter+Misskey' || account_link_type === 'Twitter+Bluesky+Misskey'"
+                                class="settings__item-form mt-3" color="primary" variant="outlined"
+                                label="Twitter アカウント" :items="account_link_twitter_items" v-model="account_link_twitter_account_id"
+                                :density="is_form_dense ? 'compact' : 'default'">
+                            </v-select>
+                            <v-select v-if="account_link_type === 'Twitter+Bluesky' || account_link_type === 'Bluesky+Misskey' || account_link_type === 'Twitter+Bluesky+Misskey'"
+                                class="settings__item-form mt-3" color="primary" variant="outlined"
+                                label="Bluesky アカウント" :items="account_link_bluesky_items" v-model="account_link_bluesky_account_id"
+                                :density="is_form_dense ? 'compact' : 'default'">
+                            </v-select>
+                            <v-select v-if="account_link_type === 'Twitter+Misskey' || account_link_type === 'Bluesky+Misskey' || account_link_type === 'Twitter+Bluesky+Misskey'"
+                                class="settings__item-form mt-3" color="primary" variant="outlined"
+                                label="Misskey アカウント" :items="account_link_misskey_items" v-model="account_link_misskey_account_id"
+                                :density="is_form_dense ? 'compact' : 'default'">
                             </v-select>
                         </v-card-text>
                         <v-card-actions class="pt-0 px-6 pb-6">
@@ -332,7 +433,7 @@
             </div>
         </div>
         <v-overlay class="align-center justify-center" :persistent="true"
-            :model-value="is_twitter_cookie_auth_sending || is_bluesky_auth_sending" z-index="300">
+            :model-value="is_twitter_cookie_auth_sending || is_bluesky_auth_sending || is_misskey_auth_sending" z-index="300">
             <v-progress-circular color="secondary" indeterminate size="64" />
         </v-overlay>
     </SettingsBase>
@@ -346,6 +447,7 @@ import { VForm } from 'vuetify/components';
 import Message from '@/message';
 import AccountLinks from '@/services/AccountLinks';
 import Bluesky, { IBlueskyAuthRequest } from '@/services/Bluesky';
+import Misskey from '@/services/Misskey';
 import Twitter, { IBrowserEnvironmentInfoRequest, ITwitterCookieAuthRequest } from '@/services/Twitter';
 import { IAccountLink } from '@/services/Users';
 import useSettingsStore from '@/stores/SettingsStore';
@@ -436,14 +538,51 @@ export default defineComponent({
             // Bluesky の App Password を表示するかどうか
             bluesky_app_password_showing: false,
 
-            // Twitter / Bluesky 紐付け追加ダイヤログ
+            // Misskey 認証実行中かどうか
+            is_misskey_auth_sending: false,
+
+            // Misskey 認証用ダイヤログ
+            misskey_auth_dialog: false,
+
+            // Misskey インスタンスの URL
+            misskey_instance_url: '',
+
+            // Misskey のアクセストークン
+            misskey_access_token: '',
+
+            // Misskey のアクセストークンを表示するかどうか
+            misskey_access_token_showing: false,
+
+            // Misskey のデフォルト公開範囲
+            misskey_visibility: 'home',
+
+            // Misskey の公開範囲の選択肢
+            misskey_visibility_items: [
+                {title: 'ホーム (フォロワーのホームに表示)', value: 'home'},
+                {title: 'パブリック (すべての人に公開)', value: 'public'},
+                {title: 'フォロワー限定', value: 'followers'},
+            ],
+
+            // Misskey のチャンネル ID
+            misskey_channel_id: '',
+
+            // Misskey のドライブフォルダ ID
+            misskey_drive_folder_id: '',
+
+            // SNS アカウント紐付け追加ダイヤログ
             account_link_dialog: false,
+
+            // 紐付けの種類 (Twitter+Bluesky / Twitter+Misskey / Bluesky+Misskey / Twitter+Bluesky+Misskey)
+            account_link_type: 'Twitter+Bluesky' as 'Twitter+Bluesky' | 'Twitter+Misskey' | 'Bluesky+Misskey' | 'Twitter+Bluesky+Misskey',
 
             // 紐付ける Twitter アカウント ID
             account_link_twitter_account_id: null as number | null,
 
             // 紐付ける Bluesky アカウント ID
             account_link_bluesky_account_id: null as number | null,
+
+            // 紐付ける Misskey アカウント ID
+            account_link_misskey_account_id: null as number | null,
         };
     },
     computed: {
@@ -454,25 +593,57 @@ export default defineComponent({
                 return false;
             }
             return this.userStore.user.twitter_accounts.length > 0 ||
-                this.userStore.user.bluesky_accounts.length > 0;
+                this.userStore.user.bluesky_accounts.length > 0 ||
+                this.userStore.user.misskey_accounts.length > 0;
         },
 
         has_no_linked_accounts(): boolean {
             return this.has_linked_accounts === false;
         },
 
+        // 紐付け種類の選択肢 (利用可能なアカウントの組み合わせのみ表示)
+        account_link_type_items(): {title: string; value: string;}[] {
+            const has_twitter = (this.userStore.user?.twitter_accounts.length ?? 0) > 0;
+            const has_bluesky = (this.userStore.user?.bluesky_accounts.length ?? 0) > 0;
+            const has_misskey = (this.userStore.user?.misskey_accounts.length ?? 0) > 0;
+            const items: {title: string; value: string;}[] = [];
+            if (has_twitter && has_bluesky) items.push({title: 'Twitter + Bluesky', value: 'Twitter+Bluesky'});
+            if (has_twitter && has_misskey) items.push({title: 'Twitter + Misskey', value: 'Twitter+Misskey'});
+            if (has_bluesky && has_misskey) items.push({title: 'Bluesky + Misskey', value: 'Bluesky+Misskey'});
+            if (has_twitter && has_bluesky && has_misskey) items.push({title: 'Twitter + Bluesky + Misskey', value: 'Twitter+Bluesky+Misskey'});
+            return items;
+        },
+
+        // 紐付けを追加できるかどうか (少なくとも 2 種類のアカウントが登録済みの場合のみ)
+        canCreateAccountLink(): boolean {
+            return this.account_link_type_items.length > 0;
+        },
+
         account_link_twitter_items(): {title: string; value: number;}[] {
-            const linked_twitter_ids = new Set(this.userStore.user?.account_links.map(account_link => account_link.twitter_account.id) ?? []);
+            const linked_twitter_ids = new Set(
+                this.userStore.user?.account_links.flatMap(l => l.twitter_account !== null ? [l.twitter_account.id] : []) ?? [],
+            );
             return (this.userStore.user?.twitter_accounts ?? [])
                 .filter(twitter_account => linked_twitter_ids.has(twitter_account.id) === false)
                 .map(twitter_account => ({title: `@${twitter_account.screen_name}`, value: twitter_account.id}));
         },
 
         account_link_bluesky_items(): {title: string; value: number;}[] {
-            const linked_bluesky_ids = new Set(this.userStore.user?.account_links.map(account_link => account_link.bluesky_account.id) ?? []);
+            const linked_bluesky_ids = new Set(
+                this.userStore.user?.account_links.flatMap(l => l.bluesky_account !== null ? [l.bluesky_account.id] : []) ?? [],
+            );
             return (this.userStore.user?.bluesky_accounts ?? [])
                 .filter(bluesky_account => linked_bluesky_ids.has(bluesky_account.id) === false)
                 .map(bluesky_account => ({title: `@${bluesky_account.handle}`, value: bluesky_account.id}));
+        },
+
+        account_link_misskey_items(): {title: string; value: number;}[] {
+            const linked_misskey_ids = new Set(
+                this.userStore.user?.account_links.flatMap(l => l.misskey_account !== null ? [l.misskey_account.id] : []) ?? [],
+            );
+            return (this.userStore.user?.misskey_accounts ?? [])
+                .filter(misskey_account => linked_misskey_ids.has(misskey_account.id) === false)
+                .map(misskey_account => ({title: `@${misskey_account.username}@${misskey_account.instance_url}`, value: misskey_account.id}));
         },
     },
     async created() {
@@ -525,19 +696,45 @@ export default defineComponent({
         },
 
         getAccountLinkNameRows(account_link: IAccountLink): IAccountLinkNameRow[] {
-            const twitter_name = account_link.twitter_account.name;
-            const bluesky_name = account_link.bluesky_account.name;
+            // 紐付かれているサービスの表示名だけを取得し、null (未連携) は除外する
+            const names: {id: string; icon: string; text: string;}[] = [];
+            if (account_link.twitter_account !== null) {
+                names.push({id: 'twitter-name', icon: 'fa-brands:twitter', text: account_link.twitter_account.name});
+            }
+            if (account_link.bluesky_account !== null) {
+                names.push({id: 'bluesky-name', icon: 'simple-icons:bluesky', text: account_link.bluesky_account.name});
+            }
+            if (account_link.misskey_account !== null) {
+                names.push({id: 'misskey-name', icon: 'simple-icons:misskey', text: account_link.misskey_account.name});
+            }
 
-            // 表示名が完全一致する場合は重複表示せず、1行だけ出す
-            if (twitter_name === bluesky_name) {
-                return [{id: 'shared-name', text: twitter_name}];
+            // 2サービスの表示名が完全一致する場合は重複表示せず、1行だけ出す
+            const unique_texts = [...new Set(names.map(n => n.text))];
+            if (unique_texts.length === 1) {
+                return [{id: 'shared-name', text: unique_texts[0]!}];
             }
 
             // 表示名が異なる場合はサービスアイコン付きで各行を独立して ellipsis する
-            return [
-                {id: 'twitter-name', icon: 'fa-brands:twitter', text: twitter_name},
-                {id: 'bluesky-name', icon: 'simple-icons:bluesky', text: bluesky_name},
-            ];
+            return names;
+        },
+
+        // 紐付けアカウントのサブアイコン URL を返す (2番目に表示するサービスのアイコン)
+        getAccountLinkSecondaryIconUrl(account_link: IAccountLink): string {
+            // 表示順: Twitter > Bluesky > Misskey の 2 番目以降を badge に使う
+            const icons: string[] = [];
+            if (account_link.twitter_account !== null) icons.push(account_link.twitter_account.icon_url);
+            if (account_link.bluesky_account !== null) icons.push(account_link.bluesky_account.icon_url);
+            if (account_link.misskey_account !== null) icons.push(account_link.misskey_account.icon_url);
+            return icons[1] ?? '';
+        },
+
+        // 紐付けアカウントのハンドル一覧を返す (テンプレートで @ 区切り表示するため)
+        getAccountLinkHandles(account_link: IAccountLink): string[] {
+            const handles: string[] = [];
+            if (account_link.twitter_account !== null) handles.push(`@${account_link.twitter_account.screen_name}`);
+            if (account_link.bluesky_account !== null) handles.push(`@${account_link.bluesky_account.handle}`);
+            if (account_link.misskey_account !== null) handles.push(`@${account_link.misskey_account.username}@${account_link.misskey_account.instance_url}`);
+            return handles;
         },
 
         async loginTwitterAccountWithCookieForm() {
@@ -729,14 +926,115 @@ export default defineComponent({
             Message.success(`Bluesky @${handle} との連携を解除しました。`);
         },
 
+        async loginMisskeyAccountWithTokenForm() {
+            if (this.userStore.is_logged_in === false) {
+                Message.warning('連携をはじめるには、KonomiTV アカウントにログインしてください。');
+                await Utils.sleep(0.01);
+                this.misskey_auth_dialog = false;
+                return;
+            }
+            this.misskey_auth_dialog = true;
+            this.misskey_access_token_showing = false;
+        },
+
+        closeMisskeyAuthDialog() {
+            // アクセストークンは永続化しない一時入力値なので、キャンセル時点で即座に破棄する
+            this.misskey_access_token = '';
+            this.misskey_access_token_showing = false;
+            this.misskey_auth_dialog = false;
+        },
+
+        async loginMisskeyAccountWithToken() {
+            if ((await (this.$refs.misskey_form as VForm).validate()).valid === false) {
+                return;
+            }
+            const instance_url = this.misskey_instance_url.trim();
+            if (instance_url === '') {
+                Message.warning('Misskey インスタンスの URL を入力してください！');
+                return;
+            }
+            const access_token = this.misskey_access_token.trim();
+            if (access_token === '') {
+                Message.warning('Misskey のアクセストークンを入力してください！');
+                return;
+            }
+
+            // Misskey 認証 API にリクエスト
+            this.is_misskey_auth_sending = true;
+            const result = await Misskey.auth({
+                instance_url: instance_url,
+                access_token: access_token,
+                visibility: this.misskey_visibility,
+                channel_id: this.misskey_channel_id.trim() || null,
+                drive_folder_id: this.misskey_drive_folder_id.trim() || null,
+            });
+            this.is_misskey_auth_sending = false;
+            if (result === false) {
+                return;
+            }
+            const fetched_user = await this.userStore.fetchUser(true);
+            if (fetched_user === null) {
+                Message.warning('Misskey 連携情報の再取得に失敗しました。画面を再読み込みしてください。');
+                return;
+            }
+            const current_misskey_account = [...fetched_user.misskey_accounts].sort((a, b) => {
+                return (a.updated_at < b.updated_at) ? 1 : ((a.updated_at > b.updated_at) ? -1 : 0);
+            })[0];
+            if (current_misskey_account === undefined) {
+                Message.warning('Misskey 連携情報の再取得に失敗しました。画面を再読み込みしてください。');
+                return;
+            }
+            Message.success(`Misskey @${current_misskey_account.username}@${current_misskey_account.instance_url} と連携しました。`);
+            (this.$refs.misskey_form as VForm).reset();
+            this.misskey_access_token_showing = false;
+            this.misskey_visibility = 'home';
+            this.misskey_channel_id = '';
+            this.misskey_drive_folder_id = '';
+            this.misskey_auth_dialog = false;
+        },
+
+        async logoutMisskeyAccount(account_id: number) {
+            const user = this.userStore.user;
+            const account = user?.misskey_accounts.find(a => a.id === account_id);
+            const label = account ? `@${account.username}@${account.instance_url}` : `ID: ${account_id}`;
+            const result = await Misskey.logoutAccount(account_id);
+            if (result === false) {
+                return;
+            }
+            await this.userStore.fetchUser(true);
+            Message.success(`Misskey ${label} との連携を解除しました。`);
+        },
+
         async createAccountLink() {
-            if (this.account_link_twitter_account_id === null || this.account_link_bluesky_account_id === null) {
+            // 選択された紐付け種類に応じて必要なアカウント ID の組み合わせをバリデーションする
+            const type = this.account_link_type;
+            if (type === 'Twitter+Bluesky' && (this.account_link_twitter_account_id === null || this.account_link_bluesky_account_id === null)) {
                 Message.warning('紐付ける Twitter アカウントと Bluesky アカウントを選択してください。');
                 return;
             }
+            if (type === 'Twitter+Misskey' && (this.account_link_twitter_account_id === null || this.account_link_misskey_account_id === null)) {
+                Message.warning('紐付ける Twitter アカウントと Misskey アカウントを選択してください。');
+                return;
+            }
+            if (type === 'Bluesky+Misskey' && (this.account_link_bluesky_account_id === null || this.account_link_misskey_account_id === null)) {
+                Message.warning('紐付ける Bluesky アカウントと Misskey アカウントを選択してください。');
+                return;
+            }
+            if (type === 'Twitter+Bluesky+Misskey' && (
+                this.account_link_twitter_account_id === null ||
+                this.account_link_bluesky_account_id === null ||
+                this.account_link_misskey_account_id === null
+            )) {
+                Message.warning('紐付ける Twitter / Bluesky / Misskey アカウントをすべて選択してください。');
+                return;
+            }
+            const needs_twitter = type === 'Twitter+Bluesky' || type === 'Twitter+Misskey' || type === 'Twitter+Bluesky+Misskey';
+            const needs_bluesky = type === 'Twitter+Bluesky' || type === 'Bluesky+Misskey' || type === 'Twitter+Bluesky+Misskey';
+            const needs_misskey = type === 'Twitter+Misskey' || type === 'Bluesky+Misskey' || type === 'Twitter+Bluesky+Misskey';
             const account_link = await AccountLinks.create({
-                twitter_account_id: this.account_link_twitter_account_id,
-                bluesky_account_id: this.account_link_bluesky_account_id,
+                twitter_account_id: needs_twitter ? this.account_link_twitter_account_id : null,
+                bluesky_account_id: needs_bluesky ? this.account_link_bluesky_account_id : null,
+                misskey_account_id: needs_misskey ? this.account_link_misskey_account_id : null,
             });
             if (account_link === null) {
                 return;
@@ -745,8 +1043,15 @@ export default defineComponent({
             // 次回ダイアログを開いた時に前回の選択が残らないよう選択状態をクリアする
             this.account_link_twitter_account_id = null;
             this.account_link_bluesky_account_id = null;
+            this.account_link_misskey_account_id = null;
             this.account_link_dialog = false;
-            Message.success('Twitter / Bluesky アカウントを紐付けました。');
+            const service_names: Record<typeof type, string> = {
+                'Twitter+Bluesky': 'Twitter / Bluesky',
+                'Twitter+Misskey': 'Twitter / Misskey',
+                'Bluesky+Misskey': 'Bluesky / Misskey',
+                'Twitter+Bluesky+Misskey': 'Twitter / Bluesky / Misskey',
+            };
+            Message.success(`${service_names[type]} アカウントを紐付けました。`);
         },
 
         async deleteAccountLink(link_id: number) {
@@ -915,6 +1220,11 @@ export default defineComponent({
                 background: #0F73FF;
             }
 
+            // Misskey ブランドカラー
+            &--misskey {
+                background: #96BF5B;
+            }
+
             @include smartphone-horizontal {
                 width: 20px;
                 height: 20px;
@@ -1050,6 +1360,10 @@ export default defineComponent({
             }
 
             &--bluesky {
+                margin-top: 12px;
+            }
+
+            &--misskey {
                 margin-top: 12px;
             }
         }
