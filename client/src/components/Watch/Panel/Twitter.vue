@@ -68,6 +68,38 @@
                     <Icon v-else-if="shouldPostToBluesky" icon="simple-icons:bluesky" width="14px" />
                     <Icon v-else-if="shouldPostToMisskey" icon="simple-icons:misskey" width="14px" />
                 </button>
+                <!-- Misskey 選択中のみ表示するカスタム絵文字挿入ボタン -->
+                <div v-if="isMisskeySelected" class="misskey-emoji-button-wrapper">
+                    <Teleport to="body">
+                        <div v-if="is_misskey_emoji_picker_display" class="misskey-emoji-picker-overlay" @click="closeMisskeyEmojiPicker()"></div>
+                    </Teleport>
+                    <button v-ripple class="misskey-emoji-button" :class="{'misskey-emoji-button--active': is_misskey_emoji_picker_display}"
+                        @click="is_misskey_emoji_picker_display ? closeMisskeyEmojiPicker() : openMisskeyEmojiPicker()">
+                        <Icon icon="fluent:emoji-32-regular" width="15px" />
+                    </button>
+                    <!-- 絵文字ピッカーポップアップ -->
+                    <div v-if="is_misskey_emoji_picker_display" class="misskey-emoji-picker" @click.stop="">
+                        <input v-model="misskey_emoji_search_text" class="misskey-emoji-picker__search"
+                            type="text" placeholder="絵文字を検索..." @click.stop="">
+                        <!-- ローディング中 -->
+                        <div v-if="is_loading_misskey_emojis" class="misskey-emoji-picker__loading">
+                            <v-progress-circular indeterminate size="18" width="2" color="primary" />
+                            <span class="ml-2">読み込み中...</span>
+                        </div>
+                        <!-- カスタム絵文字グリッド -->
+                        <div v-else class="misskey-emoji-picker__grid">
+                            <button v-for="emoji in filteredMisskeyEmojis" :key="emoji.name"
+                                class="misskey-emoji-picker__btn"
+                                :title="`:${emoji.name}:`"
+                                @click.stop="insertMisskeyEmoji(`:${emoji.name}:`)">
+                                <img :src="emoji.url" :alt="emoji.name" class="misskey-emoji-picker__img" loading="lazy" decoding="async">
+                            </button>
+                            <div v-if="filteredMisskeyEmojis.length === 0 && misskey_emoji_search_text !== ''" class="misskey-emoji-picker__no-results">
+                                「{{ misskey_emoji_search_text }}」に一致する絵文字はありません
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div class="limit-meter">
                     <div class="limit-meter__content" :class="{
                         'limit-meter__content--yellow': tweet_letter_remain_count <= 20,
@@ -206,7 +238,7 @@ import TwitterCaptures from '@/components/Watch/Panel/Twitter/Captures.vue';
 import TwitterSearch from '@/components/Watch/Panel/Twitter/Search.vue';
 import TwitterTimeline from '@/components/Watch/Panel/Twitter/Timeline.vue';
 import Bluesky from '@/services/Bluesky';
-import Misskey from '@/services/Misskey';
+import Misskey, { IMisskeyEmoji } from '@/services/Misskey';
 import { IProgram } from '@/services/Programs';
 import Twitter from '@/services/Twitter';
 import { IAccountLink, ISelectableAccount } from '@/services/Users';
@@ -336,6 +368,18 @@ export default defineComponent({
 
             // Twitter パネル表示中に Keep-Alive API を叩くための interval ID
             twitter_keep_alive_interval_id: null as number | null,
+
+            // Misskey カスタム絵文字ピッカーを表示しているか
+            is_misskey_emoji_picker_display: false,
+
+            // Misskey カスタム絵文字の検索テキスト
+            misskey_emoji_search_text: '',
+
+            // Misskey カスタム絵文字一覧 (ピッカー表示時にロード)
+            misskey_custom_emojis: [] as IMisskeyEmoji[],
+
+            // Misskey カスタム絵文字ロード中か
+            is_loading_misskey_emojis: false,
         };
     },
     computed: {
@@ -454,6 +498,21 @@ export default defineComponent({
             };
         },
 
+        // Misskey 投稿が選択中かどうか (絵文字ボタン表示判定用)
+        isMisskeySelected(): boolean {
+            return this.shouldPostToMisskey;
+        },
+
+        // Misskey カスタム絵文字をフィルタリングした結果
+        filteredMisskeyEmojis(): IMisskeyEmoji[] {
+            if (this.misskey_emoji_search_text === '') return this.misskey_custom_emojis;
+            const q = this.misskey_emoji_search_text.toLowerCase();
+            return this.misskey_custom_emojis.filter(e =>
+                e.name.toLowerCase().includes(q) ||
+                e.aliases.some((a: string) => a.toLowerCase().includes(q)),
+            );
+        },
+
         // パネルで Twitter タブが表示されているかどうか
         isTwitterPanelVisible(): boolean {
             if (this.playback_mode === 'Live') {
@@ -567,6 +626,50 @@ export default defineComponent({
         this.stopTwitterKeepAliveTimer();
     },
     methods: {
+
+        // 選択中の Misskey アカウント ID を返す
+        getSelectedMisskeyAccountId(): number | null {
+            const account = this.twitterStore.selected_account;
+            if (account?.kind === 'Misskey') return account.misskey_account.id;
+            if (account?.kind === 'Linked') return account.account_link.misskey_account?.id ?? null;
+            return null;
+        },
+
+        // Misskey カスタム絵文字ピッカーを開き、絵文字をロードする
+        async openMisskeyEmojiPicker() {
+            this.is_misskey_emoji_picker_display = true;
+            const account_id = this.getSelectedMisskeyAccountId();
+            if (account_id === null) return;
+            if (this.misskey_custom_emojis.length === 0 && !this.is_loading_misskey_emojis) {
+                this.is_loading_misskey_emojis = true;
+                const emojis = await Misskey.getEmojis(account_id);
+                if (emojis !== null) {
+                    this.misskey_custom_emojis = emojis;
+                }
+                this.is_loading_misskey_emojis = false;
+            }
+        },
+
+        // Misskey カスタム絵文字ピッカーを閉じる
+        closeMisskeyEmojiPicker() {
+            this.is_misskey_emoji_picker_display = false;
+            this.misskey_emoji_search_text = '';
+        },
+
+        // テキストエリアのカーソル位置に Misskey 絵文字を挿入する
+        insertMisskeyEmoji(reaction: string) {
+            const textarea = this.$refs.tweet_text as HTMLTextAreaElement;
+            const start = textarea.selectionStart ?? this.tweet_text.length;
+            const end = textarea.selectionEnd ?? this.tweet_text.length;
+            this.tweet_text = this.tweet_text.slice(0, start) + reaction + this.tweet_text.slice(end);
+            this.updateTweetLetterCount();
+            this.$nextTick(() => {
+                const new_pos = start + reaction.length;
+                textarea.setSelectionRange(new_pos, new_pos);
+                textarea.focus();
+            });
+            this.closeMisskeyEmojiPicker();
+        },
 
         // 文字数カウントを変更するイベント
         updateTweetLetterCount() {
@@ -1962,8 +2065,120 @@ export default defineComponent({
                     background: #0F73FF;
                 }
 
+                &--misskey {
+                    background: #86b300;
+                }
+
                 &--both {
                     background: linear-gradient(90deg, rgb(var(--v-theme-twitter)) 0%, #0F73FF 100%);
+                }
+            }
+
+            // Misskey カスタム絵文字ボタン
+            .misskey-emoji-button-wrapper {
+                position: relative;
+                flex-shrink: 0;
+                margin-left: 4px;
+            }
+
+            .misskey-emoji-button {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 30px;
+                height: 100%;
+                border-radius: 7px;
+                color: rgb(var(--v-theme-text));
+                background: rgb(var(--v-theme-background-lighten-2));
+                cursor: pointer;
+
+                &--active {
+                    background: rgba(134, 179, 0, 0.2);
+                    color: #86b300;
+                }
+            }
+
+            .misskey-emoji-picker {
+                position: absolute;
+                bottom: calc(100% + 4px);
+                right: 0;
+                z-index: 200;
+                background: rgb(var(--v-theme-surface));
+                border: 1px solid rgba(var(--v-theme-on-surface), 0.15);
+                border-radius: 8px;
+                padding: 8px;
+                width: 280px;
+                max-height: 240px;
+                display: flex;
+                flex-direction: column;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+                @include smartphone-horizontal {
+                    right: unset;
+                    left: 0;
+                }
+
+                &__search {
+                    flex-shrink: 0;
+                    width: 100%;
+                    padding: 4px 8px;
+                    margin-bottom: 6px;
+                    border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+                    border-radius: 4px;
+                    background: transparent;
+                    color: rgb(var(--v-theme-on-surface));
+                    font-size: 12px;
+                    outline: none;
+                    box-sizing: border-box;
+
+                    &::placeholder {
+                        color: rgba(var(--v-theme-on-surface), 0.5);
+                    }
+                }
+
+                &__loading {
+                    display: flex;
+                    align-items: center;
+                    padding: 8px 0;
+                    font-size: 12px;
+                    color: rgba(var(--v-theme-on-surface), 0.6);
+                }
+
+                &__grid {
+                    overflow-y: auto;
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 2px;
+                }
+
+                &__btn {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 32px;
+                    height: 32px;
+                    padding: 2px;
+                    border-radius: 4px;
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    transition: background-color 0.15s ease;
+
+                    &:hover {
+                        background-color: rgba(var(--v-theme-on-surface), 0.1);
+                    }
+                }
+
+                &__img {
+                    width: 24px;
+                    height: 24px;
+                    object-fit: contain;
+                }
+
+                &__no-results {
+                    padding: 8px;
+                    font-size: 12px;
+                    color: rgba(var(--v-theme-on-surface), 0.5);
+                    text-align: center;
                 }
             }
 
@@ -2611,6 +2826,14 @@ export default defineComponent({
             }
         }
     }
+}
+
+// Misskey 絵文字ピッカーを閉じる透明オーバーレイ (scoped を外れるため :global を使う)
+:global(.misskey-emoji-picker-overlay) {
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: transparent;
 }
 
 </style>

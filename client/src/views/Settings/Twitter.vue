@@ -655,6 +655,16 @@ export default defineComponent({
         this.is_loading = false;
     },
     watch: {
+        account_link_dialog(is_open: boolean) {
+            // ダイヤログを開いたとき、現在の account_link_type が選択肢に存在しない場合は先頭の選択肢に補正する
+            // Twitter を持たずに Bluesky + Misskey だけ登録している場合などに、v-select が空になるのを防ぐ
+            if (is_open === true) {
+                const valid_values = this.account_link_type_items.map(item => item.value);
+                if (valid_values.length > 0 && valid_values.includes(this.account_link_type) === false) {
+                    this.account_link_type = valid_values[0] as typeof this.account_link_type;
+                }
+            }
+        },
         bluesky_auth_dialog(is_bluesky_auth_dialog_open: boolean) {
             // ダイヤログ外クリックや Esc キーで閉じた場合も、保存しない App Password を画面状態から確実に消す
             if (is_bluesky_auth_dialog_open === false) {
@@ -1060,7 +1070,7 @@ export default defineComponent({
                 return;
             }
             await this.userStore.fetchUser(true);
-            Message.success('Twitter / Bluesky アカウントの紐付けを解除しました。');
+            Message.success('SNS アカウントの紐付けを解除しました。');
         },
     }
 });
