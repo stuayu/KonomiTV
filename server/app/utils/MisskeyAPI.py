@@ -490,6 +490,170 @@ class MisskeyAPI:
         )
 
 
+    async def renote(self, note_id: str) -> schemas.TwitterAPIResult:
+        """
+        指定されたノートをリノートする
+
+        Args:
+            note_id (str): リノート対象のノート ID
+
+        Returns:
+            schemas.TwitterAPIResult: リノート結果
+        """
+
+        try:
+            # Misskey ではリノートも notes/create に renoteId を渡すことで行う
+            # visibility は既存の設定に従うが、チャンネルへのリノートは行わないため channelId は渡さない
+            await self._post('notes/create', {'renoteId': note_id, 'visibility': self.misskey_account.visibility})
+        except HTTPException as ex:
+            logging.error(f'{self.log_prefix} Failed to renote note:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail=f'リノートに失敗しました。({ex.detail})',
+            )
+        except Exception as ex:
+            logging.error(f'{self.log_prefix} Failed to renote note:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail='リノートに失敗しました。',
+            )
+
+        return schemas.TwitterAPIResult(is_success=True, detail='リノートしました。')
+
+
+    async def unrenote(self, note_id: str) -> schemas.TwitterAPIResult:
+        """
+        指定されたノートのリノートを取り消す
+
+        Args:
+            note_id (str): リノート取り消し対象のノート ID
+
+        Returns:
+            schemas.TwitterAPIResult: リノート取り消し結果
+        """
+
+        try:
+            await self._post('notes/unrenote', {'noteId': note_id})
+        except HTTPException as ex:
+            logging.error(f'{self.log_prefix} Failed to unrenote note:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail=f'リノートの取り消しに失敗しました。({ex.detail})',
+            )
+        except Exception as ex:
+            logging.error(f'{self.log_prefix} Failed to unrenote note:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail='リノートの取り消しに失敗しました。',
+            )
+
+        return schemas.TwitterAPIResult(is_success=True, detail='リノートを取り消しました。')
+
+
+    async def createReaction(self, note_id: str, reaction: str) -> schemas.TwitterAPIResult:
+        """
+        指定されたノートにリアクションを追加する
+
+        Args:
+            note_id (str): リアクション対象のノート ID
+            reaction (str): リアクション名 (例: ':like:', '👍', ':custom_emoji:')
+
+        Returns:
+            schemas.TwitterAPIResult: リアクション追加結果
+        """
+
+        try:
+            await self._post('notes/reactions/create', {'noteId': note_id, 'reaction': reaction})
+        except HTTPException as ex:
+            logging.error(f'{self.log_prefix} Failed to create reaction:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail=f'リアクションの追加に失敗しました。({ex.detail})',
+            )
+        except Exception as ex:
+            logging.error(f'{self.log_prefix} Failed to create reaction:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail='リアクションの追加に失敗しました。',
+            )
+
+        return schemas.TwitterAPIResult(is_success=True, detail='リアクションを追加しました。')
+
+
+    async def deleteReaction(self, note_id: str) -> schemas.TwitterAPIResult:
+        """
+        指定されたノートのリアクションを削除する
+
+        Args:
+            note_id (str): リアクション削除対象のノート ID
+
+        Returns:
+            schemas.TwitterAPIResult: リアクション削除結果
+        """
+
+        try:
+            await self._post('notes/reactions/delete', {'noteId': note_id})
+        except HTTPException as ex:
+            logging.error(f'{self.log_prefix} Failed to delete reaction:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail=f'リアクションの削除に失敗しました。({ex.detail})',
+            )
+        except Exception as ex:
+            logging.error(f'{self.log_prefix} Failed to delete reaction:', exc_info=ex)
+            return schemas.TwitterAPIResult(
+                is_success=False,
+                detail='リアクションの削除に失敗しました。',
+            )
+
+        return schemas.TwitterAPIResult(is_success=True, detail='リアクションを削除しました。')
+
+
+    async def getEmojis(self) -> schemas.MisskeyEmojisResult:
+        """
+        インスタンスのカスタム絵文字一覧を取得する
+
+        Returns:
+            schemas.MisskeyEmojisResult: カスタム絵文字一覧の取得結果
+        """
+
+        # emojis エンドポイントはインスタンスによっては認証不要だが、統一的に認証ありで呼ぶ
+        try:
+            response: dict[str, Any] = await self._post('emojis', {})
+        except HTTPException as ex:
+            logging.error(f'{self.log_prefix} Failed to fetch emojis:', exc_info=ex)
+            return schemas.MisskeyEmojisResult(
+                is_success=False,
+                detail=f'カスタム絵文字の取得に失敗しました。({ex.detail})',
+                emojis=[],
+            )
+        except Exception as ex:
+            logging.error(f'{self.log_prefix} Failed to fetch emojis:', exc_info=ex)
+            return schemas.MisskeyEmojisResult(
+                is_success=False,
+                detail='カスタム絵文字の取得に失敗しました。',
+                emojis=[],
+            )
+
+        raw_emojis: list[dict[str, Any]] = response.get('emojis', [])
+        emojis: list[schemas.MisskeyEmoji] = [
+            schemas.MisskeyEmoji(
+                name=e.get('name', ''),
+                category=e.get('category') or None,
+                aliases=e.get('aliases', []),
+                url=e.get('url', ''),
+            )
+            for e in raw_emojis
+            if e.get('name') and e.get('url')
+        ]
+
+        return schemas.MisskeyEmojisResult(
+            is_success=True,
+            detail=f'カスタム絵文字を {len(emojis)} 件取得しました。',
+            emojis=emojis,
+        )
+
+
     async def searchNotes(
         self,
         query: str,

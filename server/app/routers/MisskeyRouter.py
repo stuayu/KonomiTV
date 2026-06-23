@@ -214,3 +214,97 @@ async def MisskeySearchAPI(
     """
 
     return await MisskeyAPI(misskey_account).searchNotes(query=query, until_id=cursor_id)
+
+
+@router.post(
+    '/accounts/{account_id}/notes/{note_id}/renote',
+    summary = 'Misskey リノート API',
+    response_description = 'リノート結果。',
+    response_model = schemas.TwitterAPIResult,
+    status_code = status.HTTP_200_OK,
+)
+async def MisskeyRenoteAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    note_id: Annotated[str, Path(description='リノート対象のノート ID 。')],
+):
+    """
+    指定されたノートをリノートする。<br>
+    リノートには account_id で指定した Misskey アカウントが利用される。
+    """
+
+    return await MisskeyAPI(misskey_account).renote(note_id)
+
+
+@router.delete(
+    '/accounts/{account_id}/notes/{note_id}/renote',
+    summary = 'Misskey リノート取り消し API',
+    response_description = 'リノート取り消し結果。',
+    response_model = schemas.TwitterAPIResult,
+    status_code = status.HTTP_200_OK,
+)
+async def MisskeyUnrenoteAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    note_id: Annotated[str, Path(description='リノート取り消し対象のノート ID 。')],
+):
+    """
+    指定されたノートのリノートを取り消す。<br>
+    リノート取り消しには account_id で指定した Misskey アカウントが利用される。
+    """
+
+    return await MisskeyAPI(misskey_account).unrenote(note_id)
+
+
+@router.post(
+    '/accounts/{account_id}/notes/{note_id}/reactions',
+    summary = 'Misskey リアクション追加 API',
+    response_description = 'リアクション追加結果。',
+    response_model = schemas.TwitterAPIResult,
+    status_code = status.HTTP_200_OK,
+)
+async def MisskeyCreateReactionAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    note_id: Annotated[str, Path(description='リアクション対象のノート ID 。')],
+    reaction_request: Annotated[schemas.MisskeyReactionRequest, Body(description='リアクション情報。')],
+):
+    """
+    指定されたノートにリアクションを追加する。<br>
+    リアクションには account_id で指定した Misskey アカウントが利用される。
+    """
+
+    return await MisskeyAPI(misskey_account).createReaction(note_id, reaction_request.reaction)
+
+
+@router.delete(
+    '/accounts/{account_id}/notes/{note_id}/reactions',
+    summary = 'Misskey リアクション削除 API',
+    response_description = 'リアクション削除結果。',
+    response_model = schemas.TwitterAPIResult,
+    status_code = status.HTTP_200_OK,
+)
+async def MisskeyDeleteReactionAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+    note_id: Annotated[str, Path(description='リアクション削除対象のノート ID 。')],
+):
+    """
+    指定されたノートのリアクションを削除する。<br>
+    リアクション削除には account_id で指定した Misskey アカウントが利用される。
+    """
+
+    return await MisskeyAPI(misskey_account).deleteReaction(note_id)
+
+
+@router.get(
+    '/accounts/{account_id}/emojis',
+    summary = 'Misskey カスタム絵文字一覧取得 API',
+    response_description = 'インスタンスのカスタム絵文字一覧。',
+    response_model = schemas.MisskeyEmojisResult,
+)
+async def MisskeyEmojisAPI(
+    misskey_account: Annotated[MisskeyAccount, Depends(GetCurrentMisskeyAccount)],
+):
+    """
+    接続先 Misskey インスタンスのカスタム絵文字一覧を取得する。<br>
+    カスタム絵文字の取得には account_id で指定した Misskey アカウントのインスタンスが利用される。
+    """
+
+    return await MisskeyAPI(misskey_account).getEmojis()
