@@ -70,9 +70,6 @@
                 </button>
                 <!-- Misskey 選択中のみ表示するカスタム絵文字挿入ボタン -->
                 <div v-if="isMisskeySelected" class="misskey-emoji-button-wrapper">
-                    <Teleport to="body">
-                        <div v-if="is_misskey_emoji_picker_display" class="misskey-emoji-picker-overlay" @click="closeMisskeyEmojiPicker()"></div>
-                    </Teleport>
                     <button v-ripple class="misskey-emoji-button" :class="{'misskey-emoji-button--active': is_misskey_emoji_picker_display}"
                         @click="is_misskey_emoji_picker_display ? closeMisskeyEmojiPicker() : openMisskeyEmojiPicker()">
                         <Icon icon="fluent:emoji-32-regular" width="15px" />
@@ -380,6 +377,9 @@ export default defineComponent({
 
             // Misskey カスタム絵文字ロード中か
             is_loading_misskey_emojis: false,
+
+            // Misskey 絵文字ピッカーを外クリックで閉じるためのドキュメントリスナー (null = 未登録)
+            misskey_emoji_picker_outside_click_handler: null as ((event: MouseEvent) => void) | null,
         };
     },
     computed: {
@@ -624,6 +624,9 @@ export default defineComponent({
 
         // Keep-Alive API を叩くタイマーを停止する
         this.stopTwitterKeepAliveTimer();
+
+        // Misskey カスタム絵文字ピッカーのドキュメントクリックリスナーを削除する
+        this.closeMisskeyEmojiPicker();
     },
     methods: {
 
@@ -638,6 +641,20 @@ export default defineComponent({
         // Misskey カスタム絵文字ピッカーを開き、絵文字をロードする
         async openMisskeyEmojiPicker() {
             this.is_misskey_emoji_picker_display = true;
+
+            // .watch-panel__content--active が z-index: 15 のスタッキングコンテキストを作るため、
+            // body に Teleport したオーバーレイ (z-index: 199) がピッカーより上に来てしまう問題を避けるため、
+            // オーバーレイの代わりにドキュメントクリックリスナーでピッカー外クリックを検知して閉じる
+            if (this.misskey_emoji_picker_outside_click_handler === null) {
+                this.misskey_emoji_picker_outside_click_handler = (event: MouseEvent) => {
+                    const wrapper = (this.$el as HTMLElement).querySelector('.misskey-emoji-button-wrapper');
+                    if (wrapper && !wrapper.contains(event.target as Node)) {
+                        this.closeMisskeyEmojiPicker();
+                    }
+                };
+                document.addEventListener('click', this.misskey_emoji_picker_outside_click_handler);
+            }
+
             const account_id = this.getSelectedMisskeyAccountId();
             if (account_id === null) return;
             if (this.misskey_custom_emojis.length === 0 && !this.is_loading_misskey_emojis) {
@@ -654,6 +671,10 @@ export default defineComponent({
         closeMisskeyEmojiPicker() {
             this.is_misskey_emoji_picker_display = false;
             this.misskey_emoji_search_text = '';
+            if (this.misskey_emoji_picker_outside_click_handler !== null) {
+                document.removeEventListener('click', this.misskey_emoji_picker_outside_click_handler);
+                this.misskey_emoji_picker_outside_click_handler = null;
+            }
         },
 
         // テキストエリアのカーソル位置に Misskey 絵文字を挿入する
@@ -2828,12 +2849,5 @@ export default defineComponent({
     }
 }
 
-// Misskey 絵文字ピッカーを閉じる透明オーバーレイ (scoped を外れるため :global を使う)
-:global(.misskey-emoji-picker-overlay) {
-    position: fixed;
-    inset: 0;
-    z-index: 199;
-    background: transparent;
-}
 
 </style>
