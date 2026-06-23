@@ -46,11 +46,7 @@
                         <span>{{ displayedTweet.retweet_count }}</span>
                     </button>
                     <!-- Misskey: リアクションピッカー付きボタン -->
-                    <div v-if="displayedTweet.source === 'Misskey'" class="tweet__reaction-wrapper">
-                        <!-- ピッカーを閉じるための透明オーバーレイ -->
-                        <Teleport to="body">
-                            <div v-if="showReactionPicker" class="reaction-picker-overlay" @click.stop="showReactionPicker = false; emojiSearchText = ''"></div>
-                        </Teleport>
+                    <div v-if="displayedTweet.source === 'Misskey'" ref="reactionWrapperRef" class="tweet__reaction-wrapper">
                         <button v-ripple class="tweet__action tweet__action--favorite" :class="{ 'tweet__action--active': displayedTweet.favorited }"
                             :disabled="isReactionDisabled"
                             @click.stop="handleMisskeyReactionClick">
@@ -113,7 +109,7 @@
 <script lang="ts" setup>
 
 import { storeToRefs } from 'pinia';
-import { computed, ref, toRef } from 'vue';
+import { computed, onMounted, onUnmounted, ref, toRef } from 'vue';
 
 import Message from '@/message';
 import Bluesky from '@/services/Bluesky';
@@ -135,7 +131,7 @@ const tweet = toRef(props, 'tweet');
 // RT / リポスト表示では外側の「誰が共有したか」と内側の原投稿を分け、本文や画像は原投稿側を表示する
 const displayedTweet = computed(() => tweet.value.retweeted_tweet || tweet.value);
 
-const formatText = (text: string, source: ITweet['source']) => {
+const formatText = (text: string, source: ITweet['source'], emojis: IMisskeyEmoji[] = []) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const mentionRegex = source === 'Bluesky' ? /@([a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z][a-zA-Z0-9.-]*)/g : /@(\w+)/g;
     const hashtagRegex = /[#＃]([\w\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}ー]+)/gu;
@@ -160,6 +156,19 @@ const formatText = (text: string, source: ITweet['source']) => {
         return `<a class="tweet-link" href="${hashtagUrl}" target="_blank">#${hashtag}</a>`;
     });
 
+    // Misskey カスタム絵文字 (:emoji_name:) を画像タグに置換する
+    // URL はプレースホルダー済み、メンション・ハッシュタグは <a> タグ済みなので :emoji: パターンと干渉しない
+    if (source === 'Misskey' && emojis.length > 0) {
+        const emojiMap = new Map(emojis.map(e => [e.name, e.url]));
+        formattedText = formattedText.replace(/:([a-zA-Z0-9_@.-]+):/g, (_match, name) => {
+            const url = emojiMap.get(name);
+            if (url) {
+                return `<img src="${url}" alt=":${name}:" class="tweet-custom-emoji" loading="lazy" decoding="async">`;
+            }
+            return _match;
+        });
+    }
+
     // プレースホルダーを実際のURLリンクに置き換える
     formattedText = formattedText.replace(/__URL_PLACEHOLDER_(\d+)__/g, (_, index) => {
         const url = urls[parseInt(index)];
@@ -169,9 +178,9 @@ const formatText = (text: string, source: ITweet['source']) => {
     return formattedText;
 };
 
-const formattedText = computed(() => formatText(displayedTweet.value.text, displayedTweet.value.source));
+const formattedText = computed(() => formatText(displayedTweet.value.text, displayedTweet.value.source, customEmojis.value));
 const formattedQuotedText = computed(() => displayedTweet.value.quoted_tweet ?
-    formatText(displayedTweet.value.quoted_tweet.text, displayedTweet.value.quoted_tweet.source) : '');
+    formatText(displayedTweet.value.quoted_tweet.text, displayedTweet.value.quoted_tweet.source, customEmojis.value) : '');
 
 // Twitter 側の仕様変更により、許可されたオリジン以外からの動画 URL への直接アクセスが 403 になるため、
 // KonomiTV サーバーの動画プロキシ API 経由で動画を配信する
@@ -246,6 +255,21 @@ const showReactionPicker = ref(false);
 const isLoadingEmojis = ref(false);
 const customEmojis = ref<IMisskeyEmoji[]>([]);
 const emojiSearchText = ref('');
+
+// リアクションラッパーへの参照 (ピッカー外クリック検知用)
+const reactionWrapperRef = ref<HTMLElement | null>(null);
+
+// リアクションピッカーを外クリックで閉じるためのドキュメントリスナー
+let reactionPickerOutsideClickHandler: ((event: MouseEvent) => void) | null = null;
+
+const closeReactionPicker = () => {
+    showReactionPicker.value = false;
+    emojiSearchText.value = '';
+    if (reactionPickerOutsideClickHandler !== null) {
+        document.removeEventListener('click', reactionPickerOutsideClickHandler);
+        reactionPickerOutsideClickHandler = null;
+    }
+};
 
 // フィルタリングされたカスタム絵文字 (検索語との一致)
 const filteredCustomEmojis = computed(() => {
@@ -360,7 +384,7 @@ const handleMisskeyReactionClick = async () => {
     }
     if (displayedTweet.value.favorited) {
         // 既にリアクション済みの場合はピッカーを開かずに削除する
-        showReactionPicker.value = false;
+        closeReactionPicker();
         const result = await Misskey.removeReaction(accountId, displayedTweet.value.id);
         if (result && result.is_success) {
             displayedTweet.value.favorited = false;
@@ -369,6 +393,20 @@ const handleMisskeyReactionClick = async () => {
     } else {
         // ピッカーを開くとともにカスタム絵文字をロードする
         showReactionPicker.value = true;
+
+        // .watch-panel__content--active が z-index: 15 のスタッキングコンテキストを作るため、
+        // body に Teleport したオーバーレイ (z-index: 1000) がピッカーより上に来てしまう問題を避けるため、
+        // ドキュメントクリックリスナーでピッカー外クリックを検知して閉じる
+        // リアクションボタンは @click.stop のため開いたクリックはドキュメントへ伝播しない
+        if (reactionPickerOutsideClickHandler === null) {
+            reactionPickerOutsideClickHandler = (event: MouseEvent) => {
+                if (reactionWrapperRef.value && !reactionWrapperRef.value.contains(event.target as Node)) {
+                    closeReactionPicker();
+                }
+            };
+            document.addEventListener('click', reactionPickerOutsideClickHandler);
+        }
+
         if (customEmojis.value.length === 0 && !isLoadingEmojis.value) {
             isLoadingEmojis.value = true;
             const emojis = await Misskey.getEmojis(accountId);
@@ -384,14 +422,35 @@ const handleMisskeyReactionClick = async () => {
 const selectReaction = async (reaction: string) => {
     const accountId = getSelectedMisskeyAccountId();
     if (accountId === null) return;
-    showReactionPicker.value = false;
-    emojiSearchText.value = '';
+    closeReactionPicker();
     const result = await Misskey.addReaction(accountId, displayedTweet.value.id, reaction);
     if (result && result.is_success) {
         displayedTweet.value.favorited = true;
         displayedTweet.value.favorite_count++;
     }
 };
+
+// Misskey ノートの場合はマウント時にカスタム絵文字をロードし、本文の :emoji: を画像に置換できるようにする
+// Misskey.getEmojis() はアカウント ID ごとにキャッシュするため、2 件目以降の同インスタンスの呼び出しは即座に返る
+onMounted(async () => {
+    if (displayedTweet.value.source !== 'Misskey') return;
+    const accountId = getSelectedMisskeyAccountId();
+    if (accountId === null || customEmojis.value.length > 0 || isLoadingEmojis.value) return;
+    isLoadingEmojis.value = true;
+    const emojis = await Misskey.getEmojis(accountId);
+    if (emojis !== null) {
+        customEmojis.value = emojis;
+    }
+    isLoadingEmojis.value = false;
+});
+
+// コンポーネントのアンマウント時にドキュメントリスナーを確実に削除する
+onUnmounted(() => {
+    if (reactionPickerOutsideClickHandler !== null) {
+        document.removeEventListener('click', reactionPickerOutsideClickHandler);
+        reactionPickerOutsideClickHandler = null;
+    }
+});
 
 const handleFavorite = async () => {
     if (displayedTweet.value.source === 'Bluesky') {
@@ -475,6 +534,13 @@ const handleFavorite = async () => {
         &:hover {
             text-decoration: underline;
         }
+    }
+
+    :deep(.tweet-custom-emoji) {
+        height: 1.5em;
+        vertical-align: middle;
+        display: inline-block;
+        object-fit: contain;
     }
 
     &__retweet-info {
@@ -700,14 +766,6 @@ const handleFavorite = async () => {
             margin-left: 6px;
         }
     }
-}
-
-// ピッカーを閉じる透明オーバーレイ (Tweet.vue の scoped CSS には含まれないため :global を使う)
-:global(.reaction-picker-overlay) {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: transparent;
 }
 
 .reaction-picker {
