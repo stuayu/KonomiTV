@@ -1,5 +1,5 @@
 
-import type { IPostTweetSendResult } from '@/services/Twitter';
+import type { IPostTweetSendResult, ITwitterAPIResult } from '@/services/Twitter';
 
 import Message from '@/message';
 import APIClient from '@/services/APIClient';
@@ -19,6 +19,26 @@ export interface IMisskeyAuthRequest {
     /** 画像アップロード先のドライブフォルダ ID (省略可) */
     drive_folder_id: string | null;
 }
+
+/** Misskey カスタム絵文字を表すインターフェイス */
+export interface IMisskeyEmoji {
+    /** 絵文字の名前 (コロンなし, 例: "ai") */
+    name: string;
+    /** カテゴリ名 (null の場合はカテゴリなし) */
+    category: string | null;
+    /** エイリアス一覧 */
+    aliases: string[];
+    /** 絵文字画像の URL */
+    url: string;
+}
+
+/** Misskey カスタム絵文字一覧の取得結果を表すインターフェイス */
+interface IMisskeyEmojisResult extends ITwitterAPIResult {
+    emojis: IMisskeyEmoji[];
+}
+
+/** カスタム絵文字のインスタンス URL ごとのキャッシュ (アカウント ID → 絵文字リスト) */
+const emojiCache = new Map<number, IMisskeyEmoji[]>();
 
 
 class Misskey {
@@ -156,6 +176,131 @@ class Misskey {
             return null;
         }
         return response.data;
+    }
+
+
+    /**
+     * Misskey のノートをリノートする
+     * @param account_id Misskey アカウントの DB ID
+     * @param note_id リノート対象のノート ID
+     * @returns 操作結果
+     */
+    static async renote(account_id: number, note_id: string): Promise<ITwitterAPIResult | null> {
+
+        const response = await APIClient.post<ITwitterAPIResult>(
+            `/misskey/accounts/${account_id}/notes/${note_id}/renote`, undefined, { timeout: 30 * 1000 },
+        );
+
+        if (response.type === 'error') {
+            APIClient.showGenericError(response, 'リノートに失敗しました。');
+            return null;
+        }
+        if (response.data.is_success === false) {
+            Message.error(response.data.detail);
+        }
+        return response.data;
+    }
+
+
+    /**
+     * Misskey のノートのリノートを取り消す
+     * @param account_id Misskey アカウントの DB ID
+     * @param note_id リノート取り消し対象のノート ID
+     * @returns 操作結果
+     */
+    static async cancelRenote(account_id: number, note_id: string): Promise<ITwitterAPIResult | null> {
+
+        const response = await APIClient.delete<ITwitterAPIResult>(
+            `/misskey/accounts/${account_id}/notes/${note_id}/renote`, { timeout: 30 * 1000 },
+        );
+
+        if (response.type === 'error') {
+            APIClient.showGenericError(response, 'リノートの取り消しに失敗しました。');
+            return null;
+        }
+        if (response.data.is_success === false) {
+            Message.error(response.data.detail);
+        }
+        return response.data;
+    }
+
+
+    /**
+     * Misskey のノートにリアクションを追加する
+     * @param account_id Misskey アカウントの DB ID
+     * @param note_id リアクション対象のノート ID
+     * @param reaction リアクション名 (例: ':like:', '👍', ':custom_emoji:')
+     * @returns 操作結果
+     */
+    static async addReaction(account_id: number, note_id: string, reaction: string): Promise<ITwitterAPIResult | null> {
+
+        const response = await APIClient.post<ITwitterAPIResult>(
+            `/misskey/accounts/${account_id}/notes/${note_id}/reactions`,
+            { reaction },
+            { timeout: 30 * 1000 },
+        );
+
+        if (response.type === 'error') {
+            APIClient.showGenericError(response, 'リアクションの追加に失敗しました。');
+            return null;
+        }
+        if (response.data.is_success === false) {
+            Message.error(response.data.detail);
+        }
+        return response.data;
+    }
+
+
+    /**
+     * Misskey のノートのリアクションを削除する
+     * @param account_id Misskey アカウントの DB ID
+     * @param note_id リアクション削除対象のノート ID
+     * @returns 操作結果
+     */
+    static async removeReaction(account_id: number, note_id: string): Promise<ITwitterAPIResult | null> {
+
+        const response = await APIClient.delete<ITwitterAPIResult>(
+            `/misskey/accounts/${account_id}/notes/${note_id}/reactions`, { timeout: 30 * 1000 },
+        );
+
+        if (response.type === 'error') {
+            APIClient.showGenericError(response, 'リアクションの削除に失敗しました。');
+            return null;
+        }
+        if (response.data.is_success === false) {
+            Message.error(response.data.detail);
+        }
+        return response.data;
+    }
+
+
+    /**
+     * Misskey インスタンスのカスタム絵文字一覧を取得する (キャッシュあり)
+     * @param account_id Misskey アカウントの DB ID
+     * @returns カスタム絵文字一覧 (取得失敗時は null)
+     */
+    static async getEmojis(account_id: number): Promise<IMisskeyEmoji[] | null> {
+
+        // キャッシュが存在するならそのまま返す
+        const cached = emojiCache.get(account_id);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        const response = await APIClient.get<IMisskeyEmojisResult>(
+            `/misskey/accounts/${account_id}/emojis`, { timeout: 30 * 1000 },
+        );
+
+        if (response.type === 'error') {
+            APIClient.showGenericError(response, 'カスタム絵文字の取得に失敗しました。');
+            return null;
+        }
+        if (response.data.is_success === false) {
+            return null;
+        }
+
+        emojiCache.set(account_id, response.data.emojis);
+        return response.data.emojis;
     }
 }
 

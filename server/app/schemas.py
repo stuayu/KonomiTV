@@ -456,6 +456,26 @@ class MisskeyAuthRequest(BaseModel):
     # 画像アップロード先のドライブフォルダ ID (省略可)
     drive_folder_id: str | None = None
 
+class MisskeyReactionRequest(BaseModel):
+    # リアクション名 (例: ':like:', '👍', ':custom_emoji:')
+    reaction: str
+
+class MisskeyEmoji(TypedDict):
+    # カスタム絵文字の名前 (コロンなし, 例: "ai")
+    name: str
+    # カテゴリ名 (None の場合はカテゴリなし)
+    category: str | None
+    # エイリアス一覧
+    aliases: list[str]
+    # 絵文字画像の URL
+    url: str
+
+class MisskeyEmojisResult(BaseModel):
+    is_success: bool
+    detail: str
+    # インスタンスのカスタム絵文字一覧
+    emojis: list[MisskeyEmoji]
+
 # モデルに関連しない API レスポンスの構造を表す Pydantic モデル
 ## レスポンスボディの JSON 構造と一致する
 

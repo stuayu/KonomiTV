@@ -4,7 +4,9 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="16.25px" height="13px" viewBox="0 0 640 512" style="color: rgb(var(--v-theme-success-lighten-1));">
                 <path fill="currentColor" d="M629.657 343.598L528.971 444.284c-9.373 9.372-24.568 9.372-33.941 0L394.343 343.598c-9.373-9.373-9.373-24.569 0-33.941l10.823-10.823c9.562-9.562 25.133-9.34 34.419.492L480 342.118V160H292.451a24.005 24.005 0 0 1-16.971-7.029l-16-16C244.361 121.851 255.069 96 276.451 96H520c13.255 0 24 10.745 24 24v222.118l40.416-42.792c9.285-9.831 24.856-10.054 34.419-.492l10.823 10.823c9.372 9.372 9.372 24.569-.001 33.941m-265.138 15.431A23.999 23.999 0 0 0 347.548 352H160V169.881l40.416 42.792c9.286 9.831 24.856 10.054 34.419.491l10.822-10.822c9.373-9.373 9.373-24.569 0-33.941L144.971 67.716c-9.373-9.373-24.569-9.373-33.941 0L10.343 168.402c-9.373 9.373-9.373 24.569 0 33.941l10.822 10.822c9.562 9.562 25.133 9.34 34.419-.491L96 169.881V392c0 13.255 10.745 24 24 24h243.549c21.382 0 32.09-25.851 16.971-40.971z"></path>
             </svg>
-            <span class="ml-2"><a class="tweet__retweet-info-link" :href="getUserUrl(tweet.user)" target="_blank" @click.stop>{{ tweet.user.name }}</a>さんがリツイートしました</span>
+            <span class="ml-2">
+                <a class="tweet__retweet-info-link" :href="getUserUrl(tweet.user)" target="_blank" @click.stop>{{ tweet.user.name }}</a>さんが{{ tweet.source === 'Misskey' ? 'リノート' : 'リツイート' }}しました
+            </span>
         </div>
         <div class="tweet__main-content">
             <a class="tweet__user-icon" :href="getUserUrl(displayedTweet.user)" target="_blank" @click.stop>
@@ -43,7 +45,59 @@
                         </svg>
                         <span>{{ displayedTweet.retweet_count }}</span>
                     </button>
-                    <button v-ripple class="tweet__action tweet__action--favorite" :class="{ 'tweet__action--active': displayedTweet.favorited }"
+                    <!-- Misskey: リアクションピッカー付きボタン -->
+                    <div v-if="displayedTweet.source === 'Misskey'" class="tweet__reaction-wrapper">
+                        <!-- ピッカーを閉じるための透明オーバーレイ -->
+                        <Teleport to="body">
+                            <div v-if="showReactionPicker" class="reaction-picker-overlay" @click.stop="showReactionPicker = false; emojiSearchText = ''"></div>
+                        </Teleport>
+                        <button v-ripple class="tweet__action tweet__action--favorite" :class="{ 'tweet__action--active': displayedTweet.favorited }"
+                            :disabled="isReactionDisabled"
+                            @click.stop="handleMisskeyReactionClick">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 512 512">
+                                <path fill="currentColor" d="M462.3 62.6C407.5 15.9 326 24.3 275.7 76.2L256 96.5l-19.7-20.3C186.1 24.3 104.5 15.9 49.7 62.6c-62.8 53.6-66.1 149.8-9.9 207.9l193.5 199.8c12.5 12.9 32.8 12.9 45.3 0l193.5-199.8c56.3-58.1 53-154.3-9.8-207.9"></path>
+                            </svg>
+                            <span>{{ displayedTweet.favorite_count }}</span>
+                        </button>
+                        <!-- リアクションピッカーポップアップ -->
+                        <div v-if="showReactionPicker" class="reaction-picker" @click.stop="">
+                            <!-- 標準リアクション (Unicode 絵文字) -->
+                            <div class="reaction-picker__standard">
+                                <button v-for="emoji in standardReactions" :key="emoji"
+                                    class="reaction-picker__btn reaction-picker__btn--standard"
+                                    :title="emoji"
+                                    @click.stop="selectReaction(emoji)">
+                                    {{ emoji }}
+                                </button>
+                            </div>
+                            <!-- カスタム絵文字の検索ボックス -->
+                            <input v-if="!isLoadingEmojis && customEmojis.length > 0"
+                                v-model="emojiSearchText"
+                                class="reaction-picker__search"
+                                type="text"
+                                placeholder="絵文字を検索..."
+                                @click.stop="">
+                            <!-- ローディング中 -->
+                            <div v-if="isLoadingEmojis" class="reaction-picker__loading">
+                                <v-progress-circular indeterminate size="18" width="2" color="primary" />
+                                <span class="ml-2">読み込み中...</span>
+                            </div>
+                            <!-- カスタム絵文字グリッド -->
+                            <div v-else-if="filteredCustomEmojis.length > 0" class="reaction-picker__custom">
+                                <button v-for="emoji in filteredCustomEmojis" :key="emoji.name"
+                                    class="reaction-picker__btn reaction-picker__btn--custom"
+                                    :title="`:${emoji.name}:`"
+                                    @click.stop="selectReaction(`:${emoji.name}:`)">
+                                    <img :src="emoji.url" :alt="emoji.name" class="reaction-picker__emoji-img" loading="lazy" decoding="async">
+                                </button>
+                            </div>
+                            <div v-else-if="!isLoadingEmojis && emojiSearchText !== ''" class="reaction-picker__no-results">
+                                「{{ emojiSearchText }}」に一致する絵文字はありません
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Twitter / Bluesky: 通常のいいねボタン -->
+                    <button v-else v-ripple class="tweet__action tweet__action--favorite" :class="{ 'tweet__action--active': displayedTweet.favorited }"
                         :disabled="isReactionDisabled"
                         @click.stop="handleFavorite">
                         <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 512 512">
@@ -59,10 +113,11 @@
 <script lang="ts" setup>
 
 import { storeToRefs } from 'pinia';
-import { computed, toRef } from 'vue';
+import { computed, ref, toRef } from 'vue';
 
 import Message from '@/message';
 import Bluesky from '@/services/Bluesky';
+import Misskey, { IMisskeyEmoji } from '@/services/Misskey';
 import Twitter, { ITweet } from '@/services/Twitter';
 import { ITweetUser } from '@/services/Twitter';
 import useTwitterStore from '@/stores/TwitterStore';
@@ -128,9 +183,16 @@ const proxyMovieUrl = computed(() => {
 });
 
 const getUserUrl = (user: ITweetUser) => {
-    // 投稿元サービスに合わせてプロフィール URL を生成し、Bluesky 投稿から X 側へ飛ばないようにする
+    // 投稿元サービスに合わせてプロフィール URL を生成し、Bluesky/Misskey 投稿から X 側へ飛ばないようにする
     if (user.source === 'Bluesky') {
         return `https://bsky.app/profile/${user.screen_name}`;
+    }
+    if (user.source === 'Misskey') {
+        // screen_name は "username@instance_url" 形式 (例: "alice@misskey.io")
+        const at_index = user.screen_name.indexOf('@');
+        const username = at_index >= 0 ? user.screen_name.slice(0, at_index) : user.screen_name;
+        const instance = at_index >= 0 ? user.screen_name.slice(at_index + 1) : 'misskey.io';
+        return `https://${instance}/@${username}`;
     }
     return `https://x.com/${user.screen_name}`;
 };
@@ -144,6 +206,12 @@ const getTweetUrl = (targetTweet: ITweet) => {
     // Tweet スキーマは共通だが、投稿詳細 URL はサービスごとに組み立て方が異なる
     if (targetTweet.source === 'Bluesky') {
         return `https://bsky.app/profile/${targetTweet.user.screen_name}/post/${getBlueskyRecordKey(targetTweet.id)}`;
+    }
+    if (targetTweet.source === 'Misskey') {
+        // screen_name は "username@instance_url" 形式
+        const at_index = targetTweet.user.screen_name.indexOf('@');
+        const instance = at_index >= 0 ? targetTweet.user.screen_name.slice(at_index + 1) : 'misskey.io';
+        return `https://${instance}/notes/${targetTweet.id}`;
     }
     return `https://x.com/${targetTweet.user.screen_name}/status/${targetTweet.id}`;
 };
@@ -161,10 +229,44 @@ const getSelectedBlueskyHandle = () => {
     return null;
 };
 
+const getSelectedMisskeyAccountId = () => {
+    const selectedAccount = twitterStore.selected_account;
+    // Misskey 投稿への操作は現在選択中の Misskey アカウントで行う
+    if (selectedAccount?.kind === 'Misskey') {
+        return selectedAccount.misskey_account.id;
+    }
+    if (selectedAccount?.kind === 'Linked') {
+        return selectedAccount.account_link.misskey_account?.id ?? null;
+    }
+    return null;
+};
+
+// Misskey リアクションピッカーの状態
+const showReactionPicker = ref(false);
+const isLoadingEmojis = ref(false);
+const customEmojis = ref<IMisskeyEmoji[]>([]);
+const emojiSearchText = ref('');
+
+// フィルタリングされたカスタム絵文字 (検索語との一致)
+const filteredCustomEmojis = computed(() => {
+    if (emojiSearchText.value === '') return customEmojis.value;
+    const q = emojiSearchText.value.toLowerCase();
+    return customEmojis.value.filter(e =>
+        e.name.toLowerCase().includes(q) ||
+        e.aliases.some(a => a.toLowerCase().includes(q)),
+    );
+});
+
+// Misskey のよく使われるリアクション (Unicode 絵文字)
+const standardReactions = ['👍', '❤️', '😆', '🤔', '😮', '🎉', '💢', '😢'];
+
 const isReactionDisabled = computed(() => {
     // 表示中の投稿元サービスを操作できるアカウントが選択されていない場合は、誤操作に見える無反応を避ける
     if (displayedTweet.value.source === 'Bluesky') {
         return getSelectedBlueskyHandle() === null;
+    }
+    if (displayedTweet.value.source === 'Misskey') {
+        return getSelectedMisskeyAccountId() === null;
     }
     return selected_twitter_account.value === null;
 });
@@ -205,6 +307,28 @@ const handleRetweet = async () => {
         return;
     }
 
+    if (displayedTweet.value.source === 'Misskey') {
+        const accountId = getSelectedMisskeyAccountId();
+        if (accountId === null) {
+            Message.warning('Misskey 投稿を操作するには、Misskey アカウントまたは紐付けアカウントを選択してください。');
+            return;
+        }
+        if (displayedTweet.value.retweeted) {
+            const result = await Misskey.cancelRenote(accountId, displayedTweet.value.id);
+            if (result && result.is_success) {
+                displayedTweet.value.retweeted = false;
+                displayedTweet.value.retweet_count--;
+            }
+        } else {
+            const result = await Misskey.renote(accountId, displayedTweet.value.id);
+            if (result && result.is_success) {
+                displayedTweet.value.retweeted = true;
+                displayedTweet.value.retweet_count++;
+            }
+        }
+        return;
+    }
+
     // Twitter 投稿への操作は TwitterScrapeBrowser の選択アカウントが必要
     // Bluesky 単独アカウント選択中に Twitter 投稿が残っていても操作 API を呼ばない
     if (selected_twitter_account.value === null) {
@@ -224,6 +348,48 @@ const handleRetweet = async () => {
             displayedTweet.value.retweeted = true;
             displayedTweet.value.retweet_count++;
         }
+    }
+};
+
+// Misskey: リアクションボタンクリック時の処理 (favorited=true なら削除、false ならピッカーを表示)
+const handleMisskeyReactionClick = async () => {
+    const accountId = getSelectedMisskeyAccountId();
+    if (accountId === null) {
+        Message.warning('Misskey 投稿を操作するには、Misskey アカウントまたは紐付けアカウントを選択してください。');
+        return;
+    }
+    if (displayedTweet.value.favorited) {
+        // 既にリアクション済みの場合はピッカーを開かずに削除する
+        showReactionPicker.value = false;
+        const result = await Misskey.removeReaction(accountId, displayedTweet.value.id);
+        if (result && result.is_success) {
+            displayedTweet.value.favorited = false;
+            displayedTweet.value.favorite_count--;
+        }
+    } else {
+        // ピッカーを開くとともにカスタム絵文字をロードする
+        showReactionPicker.value = true;
+        if (customEmojis.value.length === 0 && !isLoadingEmojis.value) {
+            isLoadingEmojis.value = true;
+            const emojis = await Misskey.getEmojis(accountId);
+            if (emojis !== null) {
+                customEmojis.value = emojis;
+            }
+            isLoadingEmojis.value = false;
+        }
+    }
+};
+
+// Misskey: ピッカーからリアクションを選択したときの処理
+const selectReaction = async (reaction: string) => {
+    const accountId = getSelectedMisskeyAccountId();
+    if (accountId === null) return;
+    showReactionPicker.value = false;
+    emojiSearchText.value = '';
+    const result = await Misskey.addReaction(accountId, displayedTweet.value.id, reaction);
+    if (result && result.is_success) {
+        displayedTweet.value.favorited = true;
+        displayedTweet.value.favorite_count++;
     }
 };
 
@@ -481,6 +647,10 @@ const handleFavorite = async () => {
         margin-top: -2px;
     }
 
+    &__reaction-wrapper {
+        position: relative;
+    }
+
     &__action {
         display: flex;
         align-items: center;
@@ -529,6 +699,109 @@ const handleFavorite = async () => {
         span {
             margin-left: 6px;
         }
+    }
+}
+
+// ピッカーを閉じる透明オーバーレイ (Tweet.vue の scoped CSS には含まれないため :global を使う)
+:global(.reaction-picker-overlay) {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: transparent;
+}
+
+.reaction-picker {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    z-index: 1001;
+    background: rgb(var(--v-theme-surface));
+    border: 1px solid rgba(var(--v-theme-on-surface), 0.15);
+    border-radius: 8px;
+    padding: 8px;
+    min-width: 220px;
+    max-width: 300px;
+    max-height: 260px;
+    overflow-y: auto;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+
+    &__standard {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+        margin-bottom: 6px;
+    }
+
+    &__search {
+        width: 100%;
+        padding: 4px 8px;
+        margin-bottom: 6px;
+        border: 1px solid rgba(var(--v-theme-on-surface), 0.2);
+        border-radius: 4px;
+        background: transparent;
+        color: rgb(var(--v-theme-on-surface));
+        font-size: 12px;
+        outline: none;
+        box-sizing: border-box;
+
+        &::placeholder {
+            color: rgba(var(--v-theme-on-surface), 0.5);
+        }
+    }
+
+    &__custom {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+    }
+
+    &__loading {
+        display: flex;
+        align-items: center;
+        padding: 4px 0;
+        font-size: 12px;
+        color: rgba(var(--v-theme-on-surface), 0.6);
+    }
+
+    &__no-results {
+        padding: 4px 0;
+        font-size: 12px;
+        color: rgba(var(--v-theme-on-surface), 0.5);
+        text-align: center;
+    }
+
+    &__btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        padding: 2px;
+        border-radius: 4px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+        font-size: 18px;
+
+        &:hover {
+            background-color: rgba(var(--v-theme-on-surface), 0.1);
+        }
+        @media (hover: none) {
+            &:hover {
+                background-color: transparent;
+            }
+        }
+
+        &--custom {
+            font-size: unset;
+        }
+    }
+
+    &__emoji-img {
+        width: 24px;
+        height: 24px;
+        object-fit: contain;
     }
 }
 
