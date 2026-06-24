@@ -1,4 +1,4 @@
-
+﻿
 import assert from 'assert';
 
 import DPlayer, { DPlayerType } from 'dplayer';
@@ -67,6 +67,18 @@ class PlayerController {
     // ライブ視聴: セルラー回線でのパケ詰まり等によりスタール状態が長時間続く場合に自動再起動するタイムアウト ID
     // waiting イベントで開始し、playing イベントで解消された場合はキャンセルされる
     private live_stall_recovery_timer_id: number = 0;
+
+    // ライブ視聴: softReconnectMpegts() の実行中フラグ
+    // waiting スタールタイマーと mpegts.js ERROR ハンドラーの両方から同時に呼ばれないようにするためのガード
+    private is_soft_reconnecting: boolean = false;
+
+    // ライブ視聴: バックグラウンドから復帰した際にソフト再接続を促す visibilitychange ハンドラー
+    // destroy() 時に削除するために保持する
+    private visibility_change_handler: (() => void) | null = null;
+
+    // ライブ視聴: オフラインからオンラインに復帰した際にソフト再接続を促す online ハンドラー
+    // destroy() 時に削除するために保持する
+    private online_handler: (() => void) | null = null;
 
     // ビデオ視聴: ビデオストリームのアクティブ状態を維持するために Keep-Alive API にリクエストを送るインターバルのキャンセルする関数
     private video_keep_alive_interval_timer_cancel: (() => void) | null = null;
@@ -1040,10 +1052,10 @@ class PlayerController {
         // 1 秒待つ
         await Utils.sleep(1);
 
-        // この時点で映像が停止していて、かつ readyState が HAVE_FUTURE_DATA な場合、復旧を試みる
+        // この時点で映像が停止しているか、または readyState が HAVE_FUTURE_DATA 未満な場合、復旧を試みる
         // Safari ではタイミングによっては this.player.video が null になる場合があるらしいので ? を付ける
-        if (player_store.is_video_buffering === true && this.player?.video?.readyState < 3) {
-            console.warn('\u001b[31m[PlayerController] Video still buffering. (HTMLVideoElement.readyState < HAVE_FUTURE_DATA) Trying to recover.');
+        if (player_store.is_video_buffering === true && (this.player?.video?.readyState < 3 || this.player?.video?.paused === true)) {
+            console.warn('[PlayerController] Video is still buffering or paused. Trying to recover playback.');
 
             // 一旦停止して、0.25 秒間を置く
             this.player.video.pause();
@@ -1054,15 +1066,17 @@ class PlayerController {
                 await this.player.video.play();
             } catch (error) {
                 assert(this.player !== null);
-                console.warn('\u001b[31m[PlayerController] HTMLVideoElement.play() rejected. paused.');
-                this.player.pause();
-                return;  // 再生開始がリジェクトされた場合はここで終了
+                // Safari 26 以降では非同期コンテキストの video.play() が autoplay policy で reject されることがある
+                // reject 時は DPlayer の pause() を呼ばず終了する (video.pause() 後の pause イベントで DPlayer UI は更新済み)。
+                // this.player.pause() を余分に呼ぶと DPlayer が pause 状態に固定されてしまうためここでは呼ばない。
+                console.warn('[PlayerController] HTMLVideoElement.play() rejected. Not calling DPlayer.pause().');
+                return;  // 再生開始がリジェクトされた場合はここで終了 (DPlayer.pause() は呼ばない)
             }
 
             // さらに 0.5 秒待った時点で映像が停止している場合、復旧を試みる
             await Utils.sleep(0.5);
-            if (player_store.is_video_buffering === true && this.player?.video?.readyState < 3) {
-                console.warn('\u001b[31m[PlayerController] Video still buffering. (HTMLVideoElement.readyState < HAVE_FUTURE_DATA) Trying to recover.');
+            if (player_store.is_video_buffering === true && (this.player?.video?.readyState < 3 || this.player?.video?.paused === true)) {
+                console.warn('\u001b[31m[PlayerController] Video is still buffering or paused after retry. Trying to recover playback.');
 
                 // 一旦停止して、0.25 秒間を置く
                 this.player.video.pause();
@@ -1073,11 +1087,42 @@ class PlayerController {
                     await this.player.video.play();
                 } catch (error) {
                     assert(this.player !== null);
-                    console.warn('\u001b[31m[PlayerController] (retry) HTMLVideoElement.play() rejected. paused.');
-                    this.player.pause();
+                    console.warn('[PlayerController] (retry) HTMLVideoElement.play() rejected. Not calling DPlayer.pause().');
+                    // DPlayer.pause() は呼ばない (1 回目と同じ理由)
                 }
             }
         }
+    }
+
+
+    /**
+     * ライブ視聴: 回線復帰やバックグラウンド復帰後に再接続を試みるべき状態かを判定する
+     */
+    private shouldRecoverLivePlayback(): boolean {
+        if (this.playback_mode !== 'Live' || this.player === null || this.destroyed === true) {
+            return false;
+        }
+
+        const player_store = usePlayerStore();
+        if (player_store.live_stream_status === 'Offline') {
+            return false;
+        }
+
+        return player_store.is_video_buffering === true || this.player.video.paused === true || this.player.video.readyState < 3;
+    }
+
+
+    /**
+     * ライブ視聴: 回線復帰やバックグラウンド復帰を契機に mpegts.js の再接続を試みる
+     */
+    private triggerLivePlaybackRecovery(reason: 'online' | 'visibilitychange'): void {
+        if (this.shouldRecoverLivePlayback() === false) {
+            return;
+        }
+
+        window.clearTimeout(this.live_stall_recovery_timer_id);
+        console.warn(`[PlayerController] ${reason}: trying live playback recovery.`);
+        void this.softReconnectMpegts();
     }
 
 
@@ -1094,20 +1139,30 @@ class PlayerController {
      */
     private async softReconnectMpegts(): Promise<void> {
         if (this.player === null || this.destroyed === true) return;
-        const player_store = usePlayerStore();
-        const mpegts_player = this.player.plugins.mpegts;
 
-        // mpegts.js プラグインが存在しない場合 (hls.js 使用時など) はフルリスタートにフォールバック
-        if (!mpegts_player) {
-            console.warn('[31m[PlayerController] Soft reconnect: mpegts plugin not found. Falling back to full restart.');
-            player_store.event_emitter.emit('PlayerRestartRequired', {
-                message: '通信が途切れたため、プレイヤーを再起動しています…',
-            });
+        // 既にソフト再接続中の場合は二重呼び出しを防ぐ
+        // waiting スタールタイマーと mpegts.js ERROR ハンドラーの両方から同時に呼ばれるケースへの対策
+        if (this.is_soft_reconnecting) {
+            console.warn('[PlayerController] Soft reconnect already in progress. Ignoring duplicate call.');
             return;
         }
+        this.is_soft_reconnecting = true;
 
-        console.warn('[31m[PlayerController] Stall timeout: attempting mpegts.js soft reconnect...');
+        const player_store = usePlayerStore();
+
         try {
+            const mpegts_player = this.player.plugins.mpegts;
+
+            // mpegts.js プラグインが存在しない場合 (hls.js 使用時など) はフルリスタートにフォールバック
+            if (!mpegts_player) {
+                console.warn('[PlayerController] Soft reconnect: mpegts plugin not found. Falling back to full restart.');
+                player_store.event_emitter.emit('PlayerRestartRequired', {
+                    message: '通信が途切れたため、プレイヤーを再起動しています…',
+                });
+                return;
+            }
+
+            console.warn('[PlayerController] Stall timeout: attempting mpegts.js soft reconnect...');
             // 停滞した HTTP 接続を切断し MSE バッファをフラッシュする
             // unload() は内部で video.pause() を呼び出すが video.src (blob URL) には触れないため
             // MediaSource は維持されたまま再接続できる
@@ -1123,16 +1178,39 @@ class PlayerController {
             // unload() 内で一時停止されているため再生を再開する
             // バッファが空の状態から再び溜まるまでは waiting イベントが発火し続けるが、
             // 十分なデータが届いた時点で playing イベントが発火してスタールタイマーがキャンセルされる
+            // Safari 26 以降では非同期コンテキストでの video.play() がミュート状態でないと autoplay policy で
+            // reject されることがある。一時的にミュートして play() を成功させ、直後にミュート状態を戻す。
+            const was_muted_before_reconnect = this.player.video.muted;
+            if (!was_muted_before_reconnect) {
+                this.player.video.muted = true;
+            }
             await this.player.video.play();
-            console.warn('[31m[PlayerController] Soft reconnect initiated. Waiting for stream to resume...');
+            if (!was_muted_before_reconnect) {
+                this.player.video.muted = false;
+            }
+
+            // iOS Safari では再接続直後に DPlayer 側の再生位置同期が追従しないことがあるため、
+            // ここでも明示的に同期を掛けて描画復帰を促す
+            this.player.sync();
+
+            // しばらくしても映像が戻らない場合に備え、追加で再生状態の復旧を試みる
+            await Utils.sleep(0.25);
+            if (this.shouldRecoverLivePlayback()) {
+                this.recoverPlayback();
+            }
+
+            console.warn('[PlayerController] Soft reconnect initiated. Waiting for stream to resume...');
         } catch (error) {
             // unload/load/play のいずれかで例外が発生した場合はフルリスタートにフォールバック
-            console.warn('[31m[PlayerController] Soft reconnect failed, falling back to full restart:', error);
+            console.warn('[PlayerController] Soft reconnect failed, falling back to full restart:', error);
             if (this.player !== null && this.destroyed === false) {
                 player_store.event_emitter.emit('PlayerRestartRequired', {
                     message: '通信が途切れたため、プレイヤーを再起動しています…',
                 });
             }
+        } finally {
+            // 成功・失敗・例外いずれのケースでもフラグをリセットする
+            this.is_soft_reconnecting = false;
         }
     }
 
@@ -1158,6 +1236,24 @@ class PlayerController {
                     this.player.sync();
                 }
             }, 60 * 1000);
+
+            // iOS Safari ではバックグラウンド復帰や回線復帰後に HTTP ストリームが止まったままになることがあるため、
+            // 可視状態復帰と online イベントの双方でソフト再接続を試みる
+            this.visibility_change_handler = () => {
+                if (document.visibilityState === 'visible') {
+                    this.triggerLivePlaybackRecovery('visibilitychange');
+                }
+            };
+            document.addEventListener('visibilitychange', this.visibility_change_handler);
+
+            this.online_handler = () => {
+                // online イベントはネットワークスタックが復帰した直後に飛ぶことがあるため、
+                // Safari 側の回線確立を少し待ってから再接続する
+                window.setTimeout(() => {
+                    this.triggerLivePlaybackRecovery('online');
+                }, 1000);
+            };
+            window.addEventListener('online', this.online_handler);
         }
 
         // ビデオ視聴: ビデオストリームのアクティブ状態を維持するために 5 秒おきに Keep-Alive API にリクエストを送る
@@ -1189,7 +1285,16 @@ class PlayerController {
             this.setControlDisplayTimer();
         };
         this.player.on('play', on_play_or_pause);
-        this.player.on('pause', on_play_or_pause);
+        this.player.on('pause', () => {
+            on_play_or_pause();
+            // Safari 26 以降では playbackRate = 0 に設定すると pause イベントが発火することがある
+            // on_canplay フェーズで playbackRate = 0 により pause になった場合、is_loading === true のまま
+            // is_video_buffering が true に留まるため、ここでタイマーをキャンセルしておく
+            // (スタールとは無関係な一時停止によって live_stall_recovery_timer_id が誤動作しないように)
+            if (this.playback_mode === 'Live' && this.player !== null && player_store.is_loading === true) {
+                window.clearTimeout(this.live_stall_recovery_timer_id);
+            }
+        });
 
         // 再生が一時的に止まってバッファリングしているとき/再び再生されはじめたときのイベント
         // バッファリングの Progress Circular の表示を制御する
@@ -1219,8 +1324,11 @@ class PlayerController {
             if (this.playback_mode === 'Live') {
                 window.clearTimeout(this.live_stall_recovery_timer_id);
             }
-            // ライブ視聴: 再生が開始できていない場合に再生状態の復旧を試みる
-            if (this.playback_mode === 'Live') {
+            // ライブ視聴: 初期ロード中のみ再生状態の復旧を試みる
+            // is_loading === false (初期ロード完了後) の playing イベントで recoverPlayback() を呼ぶと、
+            // 内部の video.pause() → video.play() シーケンスで Safari 26 の autoplay policy に引っかかり
+            // play() が reject → this.player.pause() で DPlayer が pause 状態に固定されるバグが起きる
+            if (this.playback_mode === 'Live' && player_store.is_loading === true) {
                 this.recoverPlayback();
             }
         });
@@ -1263,6 +1371,12 @@ class PlayerController {
                         this.player.notice('現在ネットワーク接続がありません。オンラインになるまで待機しています…', undefined, undefined, '#FF6F6A');
                         console.warn('\u001b[31m[PlayerController] mpegts.js error event: Network error. Waiting for online...');
                         await Utils.waitUntilOnline();
+                        if (this.player === null || this.destroyed === true) {
+                            return;
+                        }
+                        console.warn('[PlayerController] Network is back online. Trying soft reconnect first.');
+                        await this.softReconnectMpegts();
+                        return;
                     }
 
                     // PlayerController の再起動を要求する
@@ -2213,6 +2327,16 @@ class PlayerController {
         window.clearTimeout(this.live_stall_recovery_timer_id);
         window.clearTimeout(this.watched_history_threshold_timer_id);
         window.clearTimeout(this.player_control_ui_hide_timer_id);
+
+        // ライブ視聴で登録したイベントハンドラーを解除
+        if (this.visibility_change_handler !== null) {
+            document.removeEventListener('visibilitychange', this.visibility_change_handler);
+            this.visibility_change_handler = null;
+        }
+        if (this.online_handler !== null) {
+            window.removeEventListener('online', this.online_handler);
+            this.online_handler = null;
+        }
 
         // プレイヤー全体のコンテナ要素の監視を停止
         if (this.player_container_resize_observer !== null) {
