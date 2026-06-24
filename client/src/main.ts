@@ -61,6 +61,10 @@ app.mount('#app');
 
 // ***** Service Worker のイベントを登録 *****
 
+const CLIENT_UPDATE_RELOAD_GUARD_KEY = 'konomitv-client-update-reload-at';
+const CLIENT_UPDATE_RELOAD_GUARD_TTL_SECONDS = 60;
+let is_client_update_reload_scheduled = false;
+
 const { updateServiceWorker } = useRegisterSW({
     // Service Worker の登録に成功したとき
     onRegisteredSW(registration) {
@@ -76,6 +80,21 @@ const { updateServiceWorker } = useRegisterSW({
     },
     // PWA の更新が必要なとき
     async onNeedRefresh() {
+        // 同一タブで updatefound / controllerchange などが短時間に重複発火すると、
+        // 自動リロードが連鎖して更新メッセージがループ表示されることがあるためガードする
+        if (is_client_update_reload_scheduled === true) {
+            console.warn('Client update reload is already scheduled. Ignoring duplicated refresh event.');
+            return;
+        }
+        const last_reload_requested_at = Number(sessionStorage.getItem(CLIENT_UPDATE_RELOAD_GUARD_KEY) ?? '0');
+        const now = Utils.time();
+        if (last_reload_requested_at > 0 && (now - last_reload_requested_at) < CLIENT_UPDATE_RELOAD_GUARD_TTL_SECONDS) {
+            console.warn('Client update refresh event was re-fired too soon after the previous reload. Auto reload skipped.');
+            Message.show('クライアント更新の再読み込みが短時間に再度要求されたため、自動リロードを停止しました。', 10);
+            return;
+        }
+        is_client_update_reload_scheduled = true;
+        sessionStorage.setItem(CLIENT_UPDATE_RELOAD_GUARD_KEY, String(now));
         console.log('New content is available; please refresh.');
         // リロードするまでトーストを表示し続ける
         Message.show('クライアントが新しいバージョンに更新されました。5秒後にリロードします。', 10);  // 10秒間表示
