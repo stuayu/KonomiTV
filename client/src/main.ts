@@ -14,6 +14,7 @@ import Message from '@/message';
 import FloatingVue from '@/plugins/floating-vue';
 import vuetify from '@/plugins/vuetify';
 import router from '@/router';
+import OfflineVideos from '@/services/OfflineVideos';
 import useSettingsStore, {
     getLocalStorageSettings,
     getNormalizedLocalClientSettings,
@@ -28,6 +29,12 @@ import Utils from '@/utils';
 SeamlessScrollPolyfill();
 
 // ***** Vue アプリケーションの初期化 *****
+
+// 前回のページ終了時に中断された前景保存を失敗表示へ移し、記録済みのセグメント範囲を回収する
+void OfflineVideos.recoverInterruptedForegroundDownloads().catch((error) => {
+    // オフライン保存領域の復旧結果から切り離し、通常のオンライン視聴画面はそのまま起動する
+    console.error('Failed to recover interrupted foreground offline downloads:', error);
+});
 
 // Vue アプリケーションを作成
 const app = createApp(App);
@@ -63,6 +70,7 @@ app.mount('#app');
 
 const CLIENT_UPDATE_RELOAD_GUARD_KEY = 'konomitv-client-update-reload-at';
 const CLIENT_UPDATE_RELOAD_GUARD_TTL_SECONDS = 60;
+// タブ内の更新制御にだけ使う実行状態であり、端末間で同期するユーザー設定には含めない
 let is_client_update_reload_scheduled = false;
 
 const { updateServiceWorker } = useRegisterSW({
@@ -94,11 +102,19 @@ const { updateServiceWorker } = useRegisterSW({
             return;
         }
         is_client_update_reload_scheduled = true;
-        sessionStorage.setItem(CLIENT_UPDATE_RELOAD_GUARD_KEY, String(now));
         console.log('New content is available; please refresh.');
+        // Safari などの前景保存中はリロードで通信が切れるため、完了またはキャンセルまで更新を保留する
+        if (await OfflineVideos.hasActiveForegroundDownload() === true) {
+            Message.show('オフライン保存の完了後にクライアントを更新します。', 10);
+            while (await OfflineVideos.hasActiveForegroundDownload() === true) {
+                await Utils.sleep(1);
+            }
+        }
         // リロードするまでトーストを表示し続ける
         Message.show('クライアントが新しいバージョンに更新されました。5秒後にリロードします。', 10);  // 10秒間表示
         await Utils.sleep(5);  // 5秒待つ
+        // 前景保存の完了待ちが60秒を超えても、実際のリロード直後からガードが有効になるよう直前に記録する
+        sessionStorage.setItem(CLIENT_UPDATE_RELOAD_GUARD_KEY, String(Utils.time()));
         // PWA (Service Worker) を更新し、ページをリロードする
         updateServiceWorker(true);
     },
@@ -165,9 +181,9 @@ settings_store.$subscribe(async () => {
 // ログイン時かつ設定の同期が有効な場合、ページ遷移に関わらず、常に3秒おきにサーバーから設定を取得する
 // 初回のページレンダリングに間に合わないのは想定内（同期の完了を待つこともできるが、それだと表示速度が遅くなるのでしょうがない）
 window.setInterval(async () => {
-    if (Utils.getAccessToken() !== null && settings_store.settings.sync_settings === true) {
+    if (Utils.getAccessToken() !== null && settings_store.settings.sync_settings === true && navigator.onLine === true) {
 
-        // サーバーに保存されている設定データをこのクライアントに同期する
+        // SettingsStore 側で同期処理を直列化し、前回の取得完了後に次の周期が再試行する
         await settings_store.syncClientSettingsFromServer();
     }
 }, 3 * 1000);  // 3秒おき
