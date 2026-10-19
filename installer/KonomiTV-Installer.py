@@ -107,7 +107,7 @@ def main():
         )
         if current_arch == 'x86_64':
             table.add_row(
-                'なお、Docker でインストールする場合の OS は Ubuntu 22.04 LTS ベースのため、\n'
+                'なお、Docker でインストールする場合の OS は Ubuntu 24.04 LTS ベースのため、\n'
                 'ホスト OS が Ubuntu/Debian 以外でも動作することが期待されます。\n'
                 'Ubuntu/Debian 以外の OS にインストールする際は、Docker でのインストールを推奨します。'
             )

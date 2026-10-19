@@ -564,7 +564,7 @@ Assets の下にある `KonomiTV-Installer.exe` をダウンロードしてく�
 
 > [!WARNING]  
 > **NVIDIA が KonomiTV で利用していたバージョンの CUDA Docker イメージを削除した影響で 、0.12.0 以下では Docker を使ったインストール方法が動作しなくなりました。**  
-> 0.13.0 以降のバージョンでは、RTX 5090 などの Blackwell 世代 GPU の対応も兼ね、CUDA Docker イメージを `nvidia/cuda:12.8.0-base-ubuntu22.04` に変更しています。0.13.0 以降へのアップデートをお願いします。  
+> 0.13.0 以降へのアップデートをお願いします。現在の Docker ビルドは Ubuntu 24.04 LTS ベースの `nvidia/cuda:12.8.0-base-ubuntu24.04` を利用し、CUDA 12.8.0 によって RTX 5090 などの Blackwell 世代 GPU にも対応します。<br>
 > なお、CUDA 12.8 の動作には  nvidia-driver-570 以上のドライバーがインストールされている必要があります。
 
 > [!WARNING]  
@@ -1068,7 +1068,7 @@ VS Code を開発に利用しています。
 
 - Python 3.11.x
 - Poetry (最新版)
-- Node.js 20.16.0 (クライアントの開発やビルドを行う場合のみ)
+- Node.js 24 (クライアントの開発やビルドを行う場合のみ)
 - yarn 1.x (クライアントの開発やビルドを行う場合のみ)
 
 事前に、上記ソフトウェアをインストールしている必要があります。
@@ -1238,7 +1238,7 @@ sudo pm2 save
 ### クライアントの開発・ビルド
 
 クライアント (フロントエンド) は Vue.js 3.x の SPA (Single Page Application) で開発されており、コーディングとビルドには少なくとも Node.js が必要です。  
-Node.js 20.16.0 / yarn 1.x で開発しています。
+Node.js 24 / yarn 1.x で開発しています。
 
 ```bash
 cd /Develop/KonomiTV/client/

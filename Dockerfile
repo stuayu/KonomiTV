@@ -1,12 +1,13 @@
+# syntax=docker/dockerfile:1
 
 # --------------------------------------------------------------------------------------------------------------
 # サードパーティーライブラリのダウンロードを行うステージ
 # Docker のマルチステージビルドを使い、最終的な Docker イメージのサイズを抑え、ビルドキャッシュを効かせる
 # --------------------------------------------------------------------------------------------------------------
 
-# 念のため最終イメージに合わせて Ubuntu 22.04 LTS にしておく
+# 念のため最終イメージに合わせて Ubuntu 24.04 LTS にしておく
 ## 中間イメージなので、サイズは（ビルドするマシンのディスク容量以外は）気にしなくて良い
-FROM ubuntu:22.04 AS thirdparty-downloader
+FROM ubuntu:24.04 AS thirdparty-downloader
 
 # apt-get に対話的に設定確認されないための設定
 ENV DEBIAN_FRONTEND=noninteractive
@@ -29,7 +30,30 @@ RUN tar xvf thirdparty-linux.tar.xz
 # クライアントのビルド成果物 (dist) は Git に含まれているが、万が一ビルドし忘れたりや開発ブランチでの利便性を考慮してビルドしておく
 # --------------------------------------------------------------------------------------------------------------
 
-FROM node:20.16.0 AS client-builder
+FROM ubuntu:24.04 AS client-builder
+
+# Official Node.js 24 archives and pinned checksums; keep this context self contained.
+RUN <<'NODE_INSTALL'
+#!/bin/sh
+# Official Node.js 24 binaries; SHA256 from nodejs.org/dist/v24.22.0/SHASUMS256.txt.
+set -eu
+version=24.22.0
+case "$(dpkg --print-architecture)" in
+  amd64) arch=x64; sha=cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008 ;;
+  arm64) arch=arm64; sha=fef00bb4d36e1c50104a9775a10359beee98f162b4104dd12472c75065c6a143 ;;
+  *) echo 'Unsupported Node.js architecture' >&2; exit 1 ;;
+esac
+apt-get update
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils libatomic1 libstdc++6
+curl -fsSL --retry 3 "https://nodejs.org/dist/v${version}/node-v${version}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz
+printf '%s  %s\n' "$sha" /tmp/node.tar.xz | sha256sum -c -
+tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+rm /tmp/node.tar.xz
+node --version
+npm --version
+rm -rf /var/lib/apt/lists/*
+npm install --global yarn@1.22.22
+NODE_INSTALL
 
 # 依存パッケージリスト (package.json/yarn.lock) だけをコピー
 WORKDIR /code/client/
@@ -50,59 +74,96 @@ RUN yarn build
 # ここで作成された実行時イメージが docker compose up -d で起動される
 # --------------------------------------------------------------------------------------------------------------
 
-# Ubuntu 22.04 LTS (with CUDA) をベースイメージとして利用
+# Ubuntu 24.04 LTS (with CUDA) をベースイメージとして利用
 ## NVEncC の動作には CUDA ライブラリが必要なため、CUDA 付きのイメージを使う
 ## RTX 5090 (Blackwell) 世代をサポートする最低バージョンである CUDA 12.8.0 を指定している
 ## cuda:x.x.x-runtime 系イメージだと NVEncC で使わない余計なライブラリが付属して重いので、base イメージを使う
-FROM nvidia/cuda:12.8.0-base-ubuntu22.04
+FROM nvidia/cuda:12.8.0-base-ubuntu24.04
 
-# タイムゾーンを東京に設定
-ENV TZ=Asia/Tokyo
-
-# apt-get に対話的に設定を確認されないための設定
-ENV DEBIAN_FRONTEND=noninteractive
-
-# サードパーティーライブラリの依存パッケージをインストール
-## libfontconfig1, libfreetype6, libfribidi0: フォント関連のライブラリ (なぜ必要だったか忘れたが多分ないと動かない)
-## QSVEncC: Intel Media VA Driver (non-free 版), Intel 版 OpenCL が必要
-## NVEncC: runtime 版には含まれているが base 版には含まれていない cuda-nvrtc-12-8, libnpp-12-8 をインストールする
-## VCEEncC: AMDGPU-PRO Driver (proprietary 版) に含まれる AMD AMF (Advanced Media Framework), AMD 版 OpenCL が必要
-## Zendriver: Twitter GraphQL API を叩くために必要な Google Chrome とサイズ小さめの日本語フォントをインストールする
-## ref: https://github.com/rigaya/QSVEnc/blob/master/Install.ja.md
-## ref: https://github.com/rigaya/VCEEnc/blob/master/Install.ja.md
-RUN apt-get update && \
-    # リポジトリ追加に必要な最低限のパッケージをインストール
-    apt-get install -y --no-install-recommends ca-certificates curl git gpg tzdata && \
-    # Intel GPU リポジトリ
-    curl -fsSL https://repositories.intel.com/gpu/intel-graphics.key | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics-keyring.gpg && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics-keyring.gpg] https://repositories.intel.com/gpu/ubuntu jammy unified' > /etc/apt/sources.list.d/intel-gpu-jammy.list && \
-    # AMD / ROCm リポジトリ
-    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --yes --dearmor --output /usr/share/keyrings/rocm-keyring.gpg && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu jammy main' > /etc/apt/sources.list.d/amdgpu.list && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu jammy proprietary' > /etc/apt/sources.list.d/amdgpu-proprietary.list && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/6.4.4 jammy main' > /etc/apt/sources.list.d/rocm.list && \
-    # Google Chrome リポジトリ
-    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --yes --dearmor --output /usr/share/keyrings/google-chrome-keyring.gpg && \
-    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list && \
-    # リポジトリを更新し、この時点で利用可能なパッケージをアップグレード
-    apt-get update && apt-get upgrade -y && \
-    # 必要なパッケージをインストール
+ENV TZ=Asia/Tokyo DEBIAN_FRONTEND=noninteractive
+ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+# LIBVA_DRIVERS_PATH は設定しない。同梱の rigaya 系エンコーダは同梱 libva と
+# thirdparty/Library/dri の iHD を使うため、システムの新しい iHD を読ませると初期化に失敗する。
+# Mesa VA-API/OpenCL always installed; AMF/ROCm 6.4.4 can be disabled at build time.
+ARG ENABLE_AMD_AMF=1
+# Same noble userspace policy as docker/common/install-gpu-runtime.sh in the stack.
+# Embedded because this upstream Docker build has its own context.
+RUN <<'GPU_INSTALL'
+#!/bin/sh
+# Ubuntu noble userspace only: the host owns GPU kernel modules and firmware.
+# The caller can omit AMD's proprietary AMF/ROCm stack with ENABLE_AMD_AMF=0.
+set -eu
+# shellcheck disable=SC1091
+. /etc/os-release
+test "$ID:$VERSION_CODENAME" = ubuntu:noble
+case "${ENABLE_AMD_AMF:-1}" in 0|1) ;; *) echo 'ENABLE_AMD_AMF must be 0 or 1' >&2; exit 1 ;; esac
+# i965 shaders and non-free iHD are in multiverse; libmfx1 is in universe.
+sed -i 's/^Components:.*/Components: main restricted universe multiverse/' /etc/apt/sources.list.d/ubuntu.sources
+apt-get update
+apt-get install -y --no-install-recommends ca-certificates curl gpg \
+    libva2 libva-drm2 libva-x11-2 vainfo clinfo ocl-icd-libopencl1 \
+    mesa-va-drivers mesa-vulkan-drivers mesa-opencl-icd libvulkan1
+# A stable arch-neutral path also works for older static FFmpeg/libva builds.
+# Do not force LIBVA_DRIVER_NAME: iHD, i965 and radeonsi must remain selectable.
+case "$(dpkg --print-architecture)" in
+    amd64) driver_dir=/usr/lib/x86_64-linux-gnu/dri ;;
+    arm64) driver_dir=/usr/lib/aarch64-linux-gnu/dri ;;
+    *) echo 'Unsupported GPU userspace architecture' >&2; exit 1 ;;
+esac
+mkdir -p /usr/local/lib
+ln -sfn "$driver_dir" /usr/local/lib/dri
+# Intel's graphics PPA publishes modern iHD/OpenCL/oneVPL packages for noble.
+# Only amd64 has these Intel/AMD proprietary packages. Mesa also works on arm64.
+if [ "$(dpkg --print-architecture)" = amd64 ]; then
+    key=0C0E6AF955CE463C03FC51574D098D70AFBE5E1F
+    curl -fsSL --retry 3 "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${key}" -o /tmp/intel-graphics.key
+    gpg --show-keys --with-colons /tmp/intel-graphics.key | grep -F "fpr:::::::::${key}:"
+    gpg --batch --yes --dearmor -o /usr/share/keyrings/intel-graphics-ppa.gpg /tmp/intel-graphics.key
+    echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics-ppa.gpg] https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main' > /etc/apt/sources.list.d/intel-graphics-ppa.list
+    apt-get update
     apt-get install -y --no-install-recommends \
-        # フォント関連のライブラリ
-        libfontconfig1 libfreetype6 libfribidi0 \
-        # Intel GPU 関連のライブラリ
-        intel-media-va-driver-non-free intel-opencl-icd libigfxcmrt7 libmfx1 libmfxgen1 libva-drm2 libva-x11-2 \
-        # NVIDIA GPU 関連のライブラリ
-        cuda-nvrtc-12-8 libnpp-12-8 \
-        # AMD GPU 関連のライブラリ
-        amf-amdgpu-pro libamdenc-amdgpu-pro libdrm2-amdgpu ocl-icd-libopencl1 rocm-opencl-runtime vulkan-amdgpu-pro \
-        # Zendriver 用に Google Chrome と日本語フォントをインストール
-        google-chrome-stable fonts-vlgothic && \
-    # 実行時イメージなので RUN の最後に掃除する
-    apt-get -y autoremove && \
-    apt-get -y clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /tmp/*
+        intel-media-va-driver-non-free i965-va-driver-shaders intel-opencl-icd libigfxcmrt7 \
+        libmfx1 libmfx-gen1.2 libvpl2
+    # Media SDK's libmfxhw64 is the Gen9 runtime; oneVPL's libmfx-gen is Gen12+.
+    # Modern OpenCL (IGC 2) and legacy1 OpenCL (IGC 1) have separate libraries/ICDs.
+    curl -fL --retry 3 https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17537.24/intel-igc-core_1.0.17537.24_amd64.deb -o /tmp/intel-igc-core.deb
+    curl -fL --retry 3 https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17537.24/intel-igc-opencl_1.0.17537.24_amd64.deb -o /tmp/intel-igc-opencl.deb
+    curl -fL --retry 3 https://github.com/intel/compute-runtime/releases/download/24.35.30872.36/intel-opencl-icd-legacy1_24.35.30872.36_amd64.deb -o /tmp/intel-opencl-icd-legacy1.deb
+    printf '%s  %s\n' \
+        c1e1ecdfe2064c047c552651cfdcdafc504f2033afafba65654338b880048b67 /tmp/intel-igc-core.deb \
+        dd016400f87fa2b6a9fa9fbcca7eb4a2629174a29de679709f9bec5cede88b0e /tmp/intel-igc-opencl.deb \
+        bbe71e4f414259e06a10cde72c29a2bd78d41b2bb2f6f8463b1806797fe66e85 /tmp/intel-opencl-icd-legacy1.deb | sha256sum -c -
+    apt-get install -y --no-install-recommends /tmp/intel-igc-core.deb /tmp/intel-igc-opencl.deb /tmp/intel-opencl-icd-legacy1.deb
+    test -s /etc/OpenCL/vendors/intel.icd
+    test -s /etc/OpenCL/vendors/intel_legacy1.icd
+    if [ "${ENABLE_AMD_AMF:-1}" = 1 ]; then
+        curl -fsSL --retry 3 https://repo.radeon.com/rocm/rocm.gpg.key | gpg --batch --yes --dearmor -o /usr/share/keyrings/rocm-keyring.gpg
+        # All AMD repositories use the same 6.4.4 release; no amdgpu-install/DKMS.
+        echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/6.4.4/ubuntu noble main proprietary' > /etc/apt/sources.list.d/amdgpu.list
+        echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/6.4.4 noble main' > /etc/apt/sources.list.d/rocm.list
+        apt-get update
+        apt-get install -y --no-install-recommends \
+            amf-amdgpu-pro=1.4.37-2203192.24.04 \
+            libamdenc-amdgpu-pro=25.10-2203192.24.04 \
+            rocm-opencl-runtime=6.4.4.60404-129~24.04
+    fi
+    rm -f /tmp/intel-graphics.key /tmp/intel-igc-core.deb /tmp/intel-igc-opencl.deb /tmp/intel-opencl-icd-legacy1.deb
+fi
+ldconfig
+rm -rf /var/lib/apt/lists/*
+GPU_INSTALL
+
+# NVIDIA CUDA runtime libraries remain provided by the CUDA 12.8 noble repository.
+# Chrome is used by Zendriver for Twitter, and the fonts cover Japanese UI/subtitles.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gpg git tzdata \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --batch --yes --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
+    && echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] https://dl.google.com/linux/chrome/deb/ stable main' > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libfontconfig1 libfreetype6 libfribidi0 cuda-nvrtc-12-8 libnpp-12-8 \
+        google-chrome-stable fonts-vlgothic \
+    && rm -rf /var/lib/apt/lists/*
 
 # ダウンロードしておいたサードパーティーライブラリをコピー
 WORKDIR /code/server/
