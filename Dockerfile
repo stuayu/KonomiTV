@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 
 # --------------------------------------------------------------------------------------------------------------
 # サードパーティーライブラリのダウンロードを行うステージ
@@ -29,7 +30,30 @@ RUN unzip thirdparty-linux.tar.xz.zip && tar xvf thirdparty-linux.tar.xz
 # クライアントのビルド成果物 (dist) は Git に含まれているが、万が一ビルドし忘れたりや開発ブランチでの利便性を考慮してビルドしておく
 # --------------------------------------------------------------------------------------------------------------
 
-FROM node:20.16.0 AS client-builder
+FROM ubuntu:24.04 AS client-builder
+
+# Official Node.js 24 archives and pinned checksums; keep this context self contained.
+RUN <<'NODE_INSTALL'
+#!/bin/sh
+# Official Node.js 24 binaries; SHA256 from nodejs.org/dist/v24.22.0/SHASUMS256.txt.
+set -eu
+version=24.22.0
+case "$(dpkg --print-architecture)" in
+  amd64) arch=x64; sha=cc2f601cee82d9a5a233302fe307abc600727035fd7d2c3a3571755989e95008 ;;
+  arm64) arch=arm64; sha=fef00bb4d36e1c50104a9775a10359beee98f162b4104dd12472c75065c6a143 ;;
+  *) echo 'Unsupported Node.js architecture' >&2; exit 1 ;;
+esac
+apt-get update
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils libatomic1 libstdc++6
+curl -fsSL --retry 3 "https://nodejs.org/dist/v${version}/node-v${version}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz
+printf '%s  %s\n' "$sha" /tmp/node.tar.xz | sha256sum -c -
+tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+rm /tmp/node.tar.xz
+node --version
+npm --version
+rm -rf /var/lib/apt/lists/*
+npm install --global yarn@1.22.22
+NODE_INSTALL
 
 # 依存パッケージリスト (package.json/yarn.lock) だけをコピー
 WORKDIR /code/client/
@@ -113,6 +137,26 @@ RUN apt-get update && \
     apt-get -y clean && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /tmp/*
+
+# Gen9〜11 (Skylake〜Ice Lake) の Intel GPU 向けに legacy OpenCL ランタイムを追加する
+## 現行の intel-opencl-icd (IGC 2.x) は Gen12 以降のみ対応のため、Gen9〜11 では QSVEncC の OpenCL フィルターが使えない
+## Intel が Gen9〜11 向けに配布している legacy1 ランタイム (IGC 1.x) を別 ICD として併存させる
+## ref: https://github.com/intel/compute-runtime/blob/master/LEGACY_PLATFORMS.md
+RUN curl -fL --retry 3 -o /tmp/intel-igc-core.deb https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17537.24/intel-igc-core_1.0.17537.24_amd64.deb && \
+    curl -fL --retry 3 -o /tmp/intel-igc-opencl.deb https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17537.24/intel-igc-opencl_1.0.17537.24_amd64.deb && \
+    curl -fL --retry 3 -o /tmp/intel-opencl-icd-legacy1.deb https://github.com/intel/compute-runtime/releases/download/24.35.30872.36/intel-opencl-icd-legacy1_24.35.30872.36_amd64.deb && \
+    printf '%s  %s\n' \
+        c1e1ecdfe2064c047c552651cfdcdafc504f2033afafba65654338b880048b67 /tmp/intel-igc-core.deb \
+        dd016400f87fa2b6a9fa9fbcca7eb4a2629174a29de679709f9bec5cede88b0e /tmp/intel-igc-opencl.deb \
+        bbe71e4f414259e06a10cde72c29a2bd78d41b2bb2f6f8463b1806797fe66e85 /tmp/intel-opencl-icd-legacy1.deb | sha256sum -c - && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends /tmp/intel-igc-core.deb /tmp/intel-igc-opencl.deb /tmp/intel-opencl-icd-legacy1.deb && \
+    test -s /etc/OpenCL/vendors/intel_legacy1.icd && \
+    # legacy1 の IGC は /usr/local/lib に入るが、deb がライブラリキャッシュを更新しないため明示的に更新する
+    ldconfig && \
+    apt-get -y autoremove && \
+    apt-get -y clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/*.deb
 
 # ダウンロードしておいたサードパーティーライブラリをコピー
 WORKDIR /code/server/

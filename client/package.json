@@ -13,6 +13,9 @@
         "typecheck": "vue-tsc --noEmit"
     },
     "type": "module",
+    "engines": {
+        "node": "^24.0.0"
+    },
     "dependencies": {
         "@github/mini-throttle": "^2.1.1",
         "@microsoft/fetch-event-source": "^2.0.1",
