@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field, RootModel, computed_field
 from tortoise.contrib.pydantic import PydanticModel
-from typing_extensions import TypedDict
 
 from app.utils.TSInformation import TerrestrialRegion
 
@@ -241,6 +240,16 @@ class RecordedProgram(PydanticModel):
 class RecordedPrograms(BaseModel):
     total: int
     recorded_programs: list[RecordedProgram]
+
+class OfflineVideoStreamMetadata(BaseModel):
+    # 保存対象の録画番組 ID
+    video_id: int
+    # DB 再構築後に同じ ID の別録画と取り違えないための録画ファイルハッシュ
+    file_hash: str
+    # -10bit や -24fps を含む実際の API 画質名 (ex: 720p-hevc-10bit-24fps)
+    quality: str
+    # 保存容量の見積もりとプレイリスト生成に使う録画時間
+    duration_seconds: float
 
 # ***** シリーズ *****
 

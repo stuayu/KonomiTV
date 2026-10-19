@@ -4,6 +4,7 @@ import assert from 'assert';
 import * as Comlink from 'comlink';
 import { convertBlobToPng, copyBlobToClipboard } from 'copy-image-clipboard';
 import DPlayer from 'dplayer';
+import { Deinterlacer } from 'mpeg2toh264/yadif';
 
 import Captures from '@/services/Captures';
 import { ILiveChannelDefault } from '@/services/Channels';
@@ -361,10 +362,15 @@ class CaptureManager implements PlayerManager {
 
         // ***** キャプチャの実行・字幕/文字スーパー/コメントを合成 *****
 
+        // YADIF Deinterlacer の動作中は、破棄可能な WebGL 描画バッファを専用 API で描き直してから取得する
+        const deinterlacer = this.player.plugins.mpeg2toh264?.deinterlacer;
+        const capture_image_bitmap_promise = deinterlacer instanceof Deinterlacer && deinterlacer.running === true ?
+            deinterlacer.capture() : createImageBitmap(this.player.video);
+
         // 高速化のため、Promise.all() で並列に実行する
         const create_image_bitmap_results = await Promise.all([
             // 現在再生中の動画のキャプチャを ImageBitmap として取得
-            createImageBitmap(this.player.video),
+            capture_image_bitmap_promise,
             // 字幕が表示されていれば、字幕の Canvas を ImageBitmap として取得
             is_caption_showing ? createImageBitmap(caption_canvas) : null,
             // 文字スーパーが表示されていれば、文字スーパーの Canvas を ImageBitmap として取得
@@ -478,7 +484,19 @@ class CaptureManager implements PlayerManager {
             for (const capture of [result.capture_normal, result.capture_caption]) {
                 if (capture !== null) {
                     try {
-                        await copyBlobToClipboard(await convertBlobToPng(capture));
+                        const png_capture = await convertBlobToPng(capture);
+                        // Document Picture-in-Picture ウインドウにフォーカスがある場合、メインウインドウの
+                        // navigator.clipboard を使うと NotAllowedError が発生するため、PiP ウインドウ側の
+                        // Clipboard API を使う
+                        const document_pip_window = ('documentPictureInPicture' in window) ?
+                            documentPictureInPicture.window : null;
+                        if (document_pip_window !== null && document_pip_window.document.hasFocus()) {
+                            await document_pip_window.navigator.clipboard.write([
+                                new ClipboardItem({[png_capture.type]: png_capture}),
+                            ]);
+                        } else {
+                            await copyBlobToClipboard(png_capture);
+                        }
                     } catch (error) {
                         this.player.notice('クリップボードへのキャプチャのコピーに失敗しました。', undefined, undefined, '#FF6F6A');
                         console.error(error);

@@ -153,8 +153,7 @@
                 <label class="settings__item-label" for="always_receive_tv_from_mirakurun">
                     利用するバックエンドが EDCB のとき、常に Mirakurun / mirakc から放送波を受信するかを設定します。
                     バックエンドに Mirakurun が選択されているときは効果がありません。<br>
-                </label>
-                <label class="settings__item-label mt-1" for="always_receive_tv_from_mirakurun">
+                    <div class="mt-1"></div>
                     KonomiTV から EDCB と Mirakurun / mirakc 両方にアクセスできる必要があります。<br>
                     EDCB はチューナー起動やチャンネル切り替えに時間がかかるため、Mirakurun / mirakc が利用できる環境であれば、この設定を有効にするとより快適に使えます。<br>
                 </label>
@@ -257,6 +256,18 @@
                     <Icon icon="fluent:add-12-filled" height="17px" />
                     <span class="ml-1">除外フォルダを追加</span>
                 </v-btn>
+            </div>
+            <div class="settings__item">
+                <div class="settings__item-heading">ネットワーク上の録画フォルダの確認間隔 (分)</div>
+                <div class="settings__item-label">
+                    NFS など、録画ファイルの追加・変更をリアルタイムに検知できないネットワークフォルダで使用します。デフォルトは 5 (分) です。<br>
+                    短くすると録画一覧への反映が早くなりますが、保存先への負荷が増えます。<br>
+                </div>
+                <v-slider class="settings__item-form" color="primary" show-ticks="always" thumb-label hide-details
+                    :min="0.5" :max="60" :step="0.5"
+                    :density="is_form_dense ? 'compact' : 'default'"
+                    v-model="server_settings.video.recorded_folders_polling_interval">
+                </v-slider>
             </div>
             <div class="settings__content-heading mt-6">
                 <Icon icon="fluent:image-multiple-16-filled" width="22px" />
@@ -590,4 +601,3 @@ async function shutdownServer() {
 }
 
 </script>
-
